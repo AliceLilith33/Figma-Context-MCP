@@ -58,3 +58,6 @@ advisor-plans/
 scripts/
 # Skill scripts ship with the skill.
 !/skills/*/scripts/
+
+# Local handoff notes for other agents
+/HANDOFF.md
