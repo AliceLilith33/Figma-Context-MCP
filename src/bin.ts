@@ -55,12 +55,17 @@ const argv = cli({
     openapi: {
       type: String,
       description:
-        "OpenAPI 3.x / Swagger 2.0 spec (file path or URL). Enables the get_api_context tool for wiring designs to backend endpoints.",
+        "Default OpenAPI 3.x / Swagger 2.0 spec (file path or URL) for the get_api_context tool. In stdio mode calls may also name their own spec file or URL.",
     },
     openapiHeader: {
       type: String,
       description:
-        'Request header used when fetching the OpenAPI spec URL, e.g. "Authorization: Bearer xxx"',
+        'Request header used when fetching the OpenAPI spec URL, e.g. "Authorization: Bearer xxx". Only sent to that URL\'s origin.',
+    },
+    openapiAllowDynamic: {
+      type: Boolean,
+      description:
+        "HTTP mode: let get_api_context calls name their own spec file or URL (always allowed in stdio mode). Only enable on a server nobody else can reach.",
     },
     stdio: {
       type: Boolean,

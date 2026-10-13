@@ -25,6 +25,7 @@ export interface ServerFlags {
   proxy?: string;
   openapi?: string;
   openapiHeader?: string;
+  openapiAllowDynamic?: boolean;
   stdio?: boolean;
   noTelemetry?: boolean;
 }
@@ -38,6 +39,7 @@ export interface ServerConfig {
   skipImageDownloads: boolean;
   imageDir: string;
   openapi: OpenApiSource | undefined;
+  openapiAllowDynamic: boolean;
   isStdioMode: boolean;
   noTelemetry: boolean;
   configSources: Record<string, Source>;
@@ -201,6 +203,11 @@ export function getServerConfig(flags: ServerFlags): ServerConfig {
   const proxy = resolve(flags.proxy, envStr("FIGMA_PROXY"), undefined);
 
   const openapi = resolveOpenApiSource(flags);
+  const openapiAllowDynamic = resolve(
+    flags.openapiAllowDynamic,
+    envBool("OPENAPI_ALLOW_DYNAMIC"),
+    false,
+  );
 
   // --format wins; --json is a back-compat alias for --format=json. Invalid
   // user-supplied values fail loudly at startup rather than silently coercing.
@@ -230,6 +237,7 @@ export function getServerConfig(flags: ServerFlags): ServerConfig {
     skipImageDownloads: skipImageDownloads.source,
     imageDir: imageDir.source,
     openapi: openapi.source,
+    openapiAllowDynamic: openapiAllowDynamic.source,
     telemetry: telemetrySource,
   };
 
@@ -260,6 +268,9 @@ export function getServerConfig(flags: ServerFlags): ServerConfig {
     console.log(
       `- OPENAPI_SPEC: ${openapi.value?.location ?? "none"}${openapi.value?.headers ? " (with auth header)" : ""} (source: ${configSources.openapi})`,
     );
+    console.log(
+      `- OPENAPI_ALLOW_DYNAMIC: ${openapiAllowDynamic.value} (source: ${configSources.openapiAllowDynamic})`,
+    );
     const telemetryEnabled = resolveTelemetryEnabled(noTelemetry);
     console.log(
       `- TELEMETRY: ${telemetryEnabled ? "enabled" : "disabled"} (source: ${configSources.telemetry})`,
@@ -276,6 +287,7 @@ export function getServerConfig(flags: ServerFlags): ServerConfig {
     skipImageDownloads: skipImageDownloads.value,
     imageDir: imageDir.value,
     openapi: openapi.value,
+    openapiAllowDynamic: openapiAllowDynamic.value,
     isStdioMode,
     noTelemetry,
     configSources,

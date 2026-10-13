@@ -51,11 +51,10 @@ operations:
 ```powershell
 claude mcp add framelink -- node E:\Library\github.com\figmma\Figma-Context-MCP\dist\bin.js `
   --stdio --figma-api-key=你的Figma令牌 `
-  --openapi=http://localhost:8080/v3/api-docs `
   --image-dir=E:\work\shop-web
 ```
 
-- `--openapi` 用本地文件时写绝对路径：相对路径按 MCP 客户端启动服务时的目录解析，不一定是项目目录。
+- 接口文档不用在这里配置：对接接口时告诉 AI 文档在哪里（导出的文件或文档 URL），或者让它在项目里找；找不到它会问你。也可以加 `--openapi=<文档>` 作为默认值。详见 [setup-guide.md 4.2](setup-guide.md#42-接口文档调用时指定或配置默认值)。
 
 - `--image-dir` 设为前端项目根目录，下载的图片和参考图会保存在项目里。
 - 验收需要 chrome-devtools MCP，请另行配置。
@@ -140,16 +139,18 @@ AI 依次：
 
 ### 第 2 步：找接口
 
-AI 从设计稿提取关键词并检索：
+AI 先确定接口文档：你在对话里说过的、项目约定里记录的、服务配置的默认文档，或者项目里的 `openapi.*`/`swagger.*` 文件；都没有就问你。确定后写进项目约定，之后每次调用都带上 `spec`。
+
+然后从设计稿提取关键词并检索：
 
 ```
-get_api_context({ keywords: ["我的订单", "实付金额", "下单时间", "收货人", "待支付", "OrderCard"] })
+get_api_context({ spec: "E:/work/shop-web/docs/api/openapi.json", keywords: ["我的订单", "实付金额", "下单时间", "收货人", "待支付", "OrderCard"] })
 ```
 
 选定 `listOrders`，并取完整结构（节选，省略了 `api:` 和 `tags`）：
 
 ```
-get_api_context({ operationIds: ["listOrders"] })
+get_api_context({ spec: "E:/work/shop-web/docs/api/openapi.json", operationIds: ["listOrders"] })
 ```
 
 ```yaml
@@ -270,7 +271,7 @@ AI 找到交接文件，用其中的 `@keywords`、`@lists`、`@actions` 检索�
 | --------------------------------------- | ---------------------------------------------------------------------- |
 | 阶段 A 和 B 之间设计稿改了              | 先重新做阶段 A（更新页面和交接文件），再做 B                           |
 | 页面不是用本 Skill 做的（没有交接文件） | AI 会向你要 Figma 链接，重新获取设计稿提取关键词，并找出写死的占位内容 |
-| 阶段 A 时没配置 `--openapi`             | 不影响，阶段 A 不需要 `get_api_context`；阶段 B 前配好即可             |
+| 阶段 A 时还没有接口文档                 | 不影响，阶段 A 不需要 `get_api_context`；阶段 B 时再提供               |
 | 交接文件被误删                          | 同「没有交接文件」，代价是多一次 Figma 调用                            |
 
 ## 6. 其他用法
@@ -287,15 +288,16 @@ AI 找到交接文件，用其中的 `@keywords`、`@lists`、`@actions` 检索�
 
 ### 7.1 安装与配置
 
-| 问题                                                                                                                                                        | 原因                                                                     | 解决办法                                                                                                                                               |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| AI 看不到 `get_api_context`                                                                                                                                 | 没加 `--openapi`；或用的是 `npx figma-developer-mcp`（npm 上的官方版本） | 用本地 `node .../dist/bin.js` 启动并加上 `--openapi`；用 `/mcp` 确认                                                                                   |
-| 调用 `get_api_context` 时报 `Failed to parse OpenAPI document` 或 `is not an OpenAPI 3.x or Swagger 2.0 document`（启动时不会报，文档在第一次调用时才加载） | 地址返回的是 Swagger UI 网页或登录页，不是文档本身                       | 改用 JSON 地址：Spring 用 `/v3/api-docs`，FastAPI 用 `/openapi.json`；先用 `node dist/bin.js api --openapi <地址>` 确认                                |
-| `Failed to fetch OpenAPI document ... 401`                                                                                                                  | 文档地址需要登录                                                         | 加上 `--openapi-header="Authorization: Bearer xxx"`                                                                                                    |
-| 文档地址连不上（公司网络）                                                                                                                                  | 需要代理                                                                 | MCP 服务加 `--proxy=http://代理:端口`，或设置 `HTTPS_PROXY`。`api` 调试命令和 `gen-mock-handlers.mjs` 不走代理，改用本地文件：先把文档下载下来再传路径 |
-| 输出里出现 `unresolved(other.yaml#/...)`                                                                                                                    | 文档由多个文件组成                                                       | `npx @redocly/cli bundle openapi.yaml -o bundled.yaml` 合并成单文件                                                                                    |
-| 后端改了文档，AI 看到的还是旧的                                                                                                                             | URL 方式有 60 秒缓存                                                     | 等 1 分钟；本地文件改动会立即生效                                                                                                                      |
-| 有多个微服务文档                                                                                                                                            | 只支持一份文档                                                           | 先合并成一份，或通过网关的聚合文档提供                                                                                                                 |
+| 问题                                                                                                                                     | 原因                                                                                                                        | 解决办法                                                                                                                                                                                                          |
+| ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AI 看不到 `get_api_context`                                                                                                              | 用的是 `npx figma-developer-mcp`（npm 上的官方版本）；或者是 HTTP 模式，既没配 `--openapi` 也没加 `--openapi-allow-dynamic` | 用本地 `node .../dist/bin.js` 启动；用 `/mcp` 确认                                                                                                                                                                |
+| 调用 `get_api_context` 时报 `is an HTML/XML page`、`Failed to parse OpenAPI document` 或 `is not an OpenAPI 3.x or Swagger 2.0 document` | 给的是 Swagger UI 网页、登录页或 Postman 集合，不是文档本身                                                                 | 改用文档本身：Spring 用 `/v3/api-docs`，FastAPI 用 `/openapi.json`，或按 [setup-guide.md 4.2](setup-guide.md#42-接口文档调用时指定或配置默认值) 导出文件；先用 `node dist/bin.js api --openapi <地址或文件>` 确认 |
+| `Failed to fetch OpenAPI document ... 401`                                                                                               | 文档地址需要登录                                                                                                            | 导出成文件再给 AI；或者用 `--openapi=<地址>` 加 `--openapi-header="Authorization: Bearer xxx"` 配成默认文档（请求头只发给同源地址）                                                                               |
+| 文档地址连不上（公司网络）                                                                                                               | 需要代理                                                                                                                    | MCP 服务加 `--proxy=http://代理:端口`，或设置 `HTTPS_PROXY`。`api` 调试命令和 `gen-mock-handlers.mjs` 不走代理，改用本地文件：先把文档下载下来再传路径                                                            |
+| 输出里有 `warning`，出现 `unresolved(./schemas/...)`                                                                                     | 文档由多个文件组成                                                                                                          | `npx @redocly/cli bundle openapi.yaml -o bundled.yaml` 合并成单文件                                                                                                                                               |
+| AI 说没有接口文档、问文档在哪                                                                                                            | 没有提供，项目约定里也没记录                                                                                                | 告诉它文档文件的绝对路径或 URL，它会记进项目约定                                                                                                                                                                  |
+| 后端改了文档，AI 看到的还是旧的                                                                                                          | URL 方式有 60 秒缓存                                                                                                        | 等 1 分钟；本地文件改动会立即生效                                                                                                                                                                                 |
+| 有多个微服务或分组的文档                                                                                                                 | 一次调用只读一份                                                                                                            | 告诉 AI 页面用到的接口在哪一份；用到多份时它会分别调用                                                                                                                                                            |
 
 ### 7.2 Figma
 

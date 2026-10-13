@@ -3,9 +3,8 @@ import yaml from "js-yaml";
 import { tagError } from "~/utils/error-meta.js";
 
 /**
- * Where the OpenAPI document comes from. Set once at startup (CLI flag / env),
- * never per tool call — letting the LLM pass arbitrary URLs would turn the tool
- * into a fetch-anything primitive.
+ * Where the OpenAPI document comes from: the server default (CLI flag / env) or
+ * a per-call `spec`, vetted by `resolveSpecSource` in source.ts.
  */
 export type OpenApiSource = {
   /** Local file path or http(s) URL. */
@@ -22,8 +21,19 @@ const URL_TTL_MS = 60_000;
 // A hung docs server would otherwise hang the tool call indefinitely.
 const FETCH_TIMEOUT_MS = 30_000;
 
+// Calls can name their own spec, so a long session may touch several; keep the
+// most recently used ones rather than every spec ever loaded.
+const MAX_CACHED_SPECS = 10;
+
 type CacheEntry = { version: number; doc: OpenApiDocument };
 const cache = new Map<string, CacheEntry>();
+
+function remember(location: string, entry: CacheEntry): void {
+  // Map iteration order is insertion order: re-inserting marks it most recent.
+  cache.delete(location);
+  cache.set(location, entry);
+  if (cache.size > MAX_CACHED_SPECS) cache.delete(cache.keys().next().value!);
+}
 
 export function isUrl(location: string): boolean {
   return /^https?:\/\//i.test(location);
@@ -42,7 +52,10 @@ export async function loadOpenApiDocument(source: OpenApiSource): Promise<OpenAp
   const cached = cache.get(location);
 
   if (isUrl(location)) {
-    if (cached && Date.now() - cached.version < URL_TTL_MS) return cached.doc;
+    if (cached && Date.now() - cached.version < URL_TTL_MS) {
+      remember(location, cached);
+      return cached.doc;
+    }
     let doc: OpenApiDocument;
     try {
       doc = parseDocument(await fetchText(location, source.headers), redactUrl(location));
@@ -53,19 +66,24 @@ export async function loadOpenApiDocument(source: OpenApiSource): Promise<OpenAp
       cached.version = Date.now();
       return cached.doc;
     }
-    cache.set(location, { version: Date.now(), doc });
+    remember(location, { version: Date.now(), doc });
     return doc;
   }
 
+  // mtime, not a TTL: re-exporting the spec over the same file is picked up on
+  // the very next call.
   const { mtimeMs } = await stat(location);
-  if (cached && cached.version === mtimeMs) return cached.doc;
+  if (cached && cached.version === mtimeMs) {
+    remember(location, cached);
+    return cached.doc;
+  }
   const doc = parseDocument(await readFile(location, "utf8"), location);
-  cache.set(location, { version: mtimeMs, doc });
+  remember(location, { version: mtimeMs, doc });
   return doc;
 }
 
 /** Error messages reach the LLM and logs; a `?token=` in the spec URL must not. */
-function redactUrl(url: string): string {
+export function redactUrl(url: string): string {
   return url.replace(/[?#].*$/, "");
 }
 
@@ -97,6 +115,17 @@ async function fetchText(url: string, headers: Record<string, string> = {}): Pro
  * unquoted dates in `example`/`enum` values into Date objects.
  */
 export function parseDocument(text: string, location: string): OpenApiDocument {
+  // A saved Swagger UI / Redoc / knife4j page is the most common wrong file.
+  // Caught before parsing so the error says what to do, not "bad YAML at line 1".
+  // `\s` also matches a leading BOM.
+  if (/^\s*</.test(text)) {
+    throw new Error(
+      `${location} is an HTML/XML page, not an OpenAPI document. ` +
+        "From Swagger UI, use the spec link under the page title (e.g. /v3/api-docs or /swagger.json) or save what it returns as a file; " +
+        "from knife4j, export the offline document in OpenAPI format.",
+    );
+  }
+
   let doc: unknown;
   try {
     doc = yaml.load(text, { schema: yaml.CORE_SCHEMA });
@@ -118,6 +147,12 @@ export function parseDocument(text: string, location: string): OpenApiDocument {
   const isOas3 = /^3(\.|$)/.test(String(record?.openapi ?? ""));
   const isSwagger2 = /^2(\.0)?$/.test(String(record?.swagger ?? ""));
   if (!isOas3 && !isSwagger2) {
+    const info = record?.info as Record<string, unknown> | undefined;
+    if (info?._postman_id !== undefined || String(info?.schema ?? "").includes("getpostman")) {
+      throw new Error(
+        `${location} is a Postman collection, not an OpenAPI document. Export the API as OpenAPI 3 or Swagger 2.0 instead.`,
+      );
+    }
     throw new Error(
       `${location} is not an OpenAPI 3.x or Swagger 2.0 document (missing "openapi: 3.x" or "swagger: 2.0").`,
     );

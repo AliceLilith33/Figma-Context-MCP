@@ -28,6 +28,11 @@
 - 类型： <!-- 例：src/types 或与 api 同文件 -->
 - 静态资源/图片： <!-- 例：src/assets/images（download_figma_images 的保存位置） -->
 
+## 接口文档
+
+- 位置： <!-- 例：docs/api/swagger.json（相对项目根目录），或 http://localhost:8080/v3/api-docs -->
+- 获取/更新方式： <!-- 例：后端改接口后，在 knife4j「文档管理 → 离线文档」导出 OpenAPI 覆盖该文件 -->
+
 ## 请求层
 
 - 请求封装： <!-- 例：src/utils/request.ts 导出的 request，禁止直接用 axios -->

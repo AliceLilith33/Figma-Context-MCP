@@ -143,6 +143,12 @@ export function buildApiContext(
     out.truncated = `Showing ${shown.length} of ${candidates.length}. Narrow with keywords/tags/pathPrefix or raise limit.`;
   }
   if (notFound.length > 0) out.notFound = notFound;
+  if (api.externalRefs.length > 0) {
+    const sample = api.externalRefs.slice(0, 3).join(", ");
+    out.warning =
+      `This spec is split across files (${api.externalRefs.length} external $ref, e.g. ${sample}); those parts show as unresolved(...). ` +
+      "Ask the user for a single-file export, or to bundle it: npx @redocly/cli bundle <main file> -o openapi.bundled.yaml";
+  }
   if (keywords.length > 0 && candidates.length === 0) {
     out.hint =
       "No operation matched these keywords. Only Chinese runs of 2+ characters and words/numbers of 3+ characters are searched. Try business nouns or English field names from the design, or call without keywords to browse by tag.";

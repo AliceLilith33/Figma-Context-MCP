@@ -4,8 +4,9 @@ import { mkdtemp, writeFile } from "fs/promises";
 import yaml from "js-yaml";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createServer } from "~/mcp/index.js";
+import { createServer, type CreateServerOptions } from "~/mcp/index.js";
 import { getApiContext, type GetApiContextInput } from "~/services/get-api-context.js";
+import { resolveSpecSource } from "~/services/openapi/source.js";
 import type { FigmaAuthOptions } from "~/services/figma.js";
 
 const fixtures = path.resolve(__dirname, "fixtures/openapi");
@@ -29,37 +30,111 @@ function operation(result: ApiContext, id: string): Operation {
   return op;
 }
 
+const auth: FigmaAuthOptions = { figmaApiKey: "unused", figmaOAuthToken: "", useOAuth: false };
+
+async function connect(
+  options: Omit<CreateServerOptions, "transport"> & { transport?: "stdio" | "http" },
+) {
+  const server = createServer(auth, { transport: "stdio", ...options });
+  const client = new Client({ name: "test", version: "1.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  return client;
+}
+
+async function callTool(client: Client, args: Record<string, unknown>) {
+  const result = await client.callTool({ name: "get_api_context", arguments: args });
+  const [content] = result.content as { type: string; text: string }[];
+  return { isError: Boolean(result.isError), text: content.text };
+}
+
 describe("get_api_context", () => {
-  it("is exposed over MCP only when an OpenAPI spec is configured", async () => {
-    const auth: FigmaAuthOptions = { figmaApiKey: "unused", figmaOAuthToken: "", useOAuth: false };
+  it("takes the spec from the call, falls back to the configured one, and asks when there is neither", async () => {
+    // stdio: no default spec needed — the agent passes the file the user handed over.
+    const stdio = await connect({});
+    expect((await stdio.listTools()).tools.map((t) => t.name)).toContain("get_api_context");
+    expect((await stdio.listPrompts()).prompts.map((p) => p.name)).toContain(
+      "implement_design_with_api",
+    );
 
-    const connect = async (openapi?: typeof oas3) => {
-      const server = createServer(auth, { transport: "stdio", openapi });
-      const client = new Client({ name: "test", version: "1.0.0" });
-      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
-      return client;
-    };
+    const missing = await callTool(stdio, { keywords: ["订单"] });
+    expect(missing.isError).toBe(true);
+    expect(missing.text).toMatch(/ask the user/);
 
-    const without = await connect();
-    const { tools: baseTools } = await without.listTools();
-    expect(baseTools.map((t) => t.name)).not.toContain("get_api_context");
-    await without.close();
-
-    const client = await connect(oas3);
-    const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toContain("get_api_context");
-    const { prompts } = await client.listPrompts();
-    expect(prompts.map((p) => p.name)).toContain("implement_design_with_api");
-
-    const result = await client.callTool({
-      name: "get_api_context",
-      arguments: { keywords: ["我的订单", "实付金额"] },
+    const given = await callTool(stdio, {
+      spec: oas3.location,
+      keywords: ["我的订单", "实付金额"],
     });
-    const [content] = result.content as { type: string; text: string }[];
-    const parsed = yaml.load(content.text) as ApiContext;
-    expect(parsed.operations[0].id).toBe("listOrders");
+    expect((yaml.load(given.text) as ApiContext).operations[0].id).toBe("listOrders");
+    await stdio.close();
+
+    // HTTP: a shared server only serves its configured spec unless explicitly opened up.
+    const bare = await connect({ transport: "http" });
+    expect((await bare.listTools()).tools.map((t) => t.name)).not.toContain("get_api_context");
+    await bare.close();
+
+    const http = await connect({ transport: "http", openapi: oas3 });
+    const [tool] = (await http.listTools()).tools.filter((t) => t.name === "get_api_context");
+    expect(tool.description).toContain(oas3.location);
+    expect((await callTool(http, { keywords: ["订单"] })).isError).toBe(false);
+    // Echoing the default back (as named in the description) is not a per-call spec.
+    const echoed = oas3.location.replaceAll("\\", "/");
+    expect((await callTool(http, { spec: echoed, keywords: ["订单"] })).isError).toBe(false);
+    expect((await callTool(http, { spec: swagger2.location })).text).toMatch(/only serves/);
+    await http.close();
+  });
+
+  it("explains the usual wrong files instead of failing with a parse error", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "api-spec-"));
+    const write = async (name: string, text: string) => {
+      await writeFile(path.join(dir, name), text);
+      return path.join(dir, name);
+    };
+    const swaggerUi = await write(
+      "index.html",
+      "<!DOCTYPE html><html><body>Swagger UI</body></html>",
+    );
+    const postman = await write(
+      "orders.postman.json",
+      '{"info":{"_postman_id":"x","name":"o"},"item":[]}',
+    );
+    const split = await write(
+      "openapi.yaml",
+      'openapi: 3.0.3\npaths:\n  /o:\n    get:\n      operationId: o\n      responses:\n        "200":\n          content:\n            application/json:\n              schema: { $ref: "./schemas/Order.yaml" }\n',
+    );
+
+    const client = await connect({});
+    const error = async (spec: string) => (await callTool(client, { spec })).text;
+
+    expect(await error("specs/openapi.yaml")).toMatch(/relative path/);
+    expect(await error(dir)).toMatch(/directory.*openapi\.yaml/);
+    expect(await error(swaggerUi)).toMatch(/HTML\/XML page/);
+    expect(await error(postman)).toMatch(/Postman collection/);
+
+    // A split spec still loads; the agent is told why parts are unresolved.
+    const result = yaml.load(
+      (await callTool(client, { spec: split, operationIds: ["o"] })).text,
+    ) as {
+      warning?: string;
+    };
+    expect(result.warning).toMatch(/split across files.*bundle/);
     await client.close();
+  });
+
+  it("sends the configured auth header only to the configured spec's origin", async () => {
+    const configured = {
+      location: "https://docs.internal/v3/api-docs",
+      headers: { Authorization: "Bearer secret" },
+    };
+    const policy = { configured, allowPerCall: true };
+
+    expect(await resolveSpecSource("https://docs.internal/v3/api-docs/admin", policy)).toEqual({
+      location: "https://docs.internal/v3/api-docs/admin",
+      headers: configured.headers,
+    });
+    expect(
+      (await resolveSpecSource("https://elsewhere.example/openapi.json", policy)).headers,
+    ).toBeUndefined();
   });
 
   it("ranks operations from design wording that only partly matches the spec", async () => {

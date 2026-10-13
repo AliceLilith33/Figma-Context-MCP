@@ -60,7 +60,7 @@ The server supports two transports (configured in `src/server.ts`):
 
    - `get_figma_data` — Fetches and simplifies Figma design data
    - `download_figma_images` — Downloads images from Figma
-   - `get_api_context` — Simplified OpenAPI spec context for wiring designs to backend data (only registered when `--openapi` is set; also exposes the `implement_design_with_api` prompt)
+   - `get_api_context` — Simplified OpenAPI spec context for wiring designs to backend data. The spec comes from the call's `spec` argument or the `--openapi` default; HTTP mode only accepts `spec` with `--openapi-allow-dynamic` and only registers the tool when one of the two is available. Also exposes the `implement_design_with_api` prompt
 
 2. **Figma Service** (`src/services/figma.ts`) — API client for Figma REST API
 
@@ -76,7 +76,8 @@ The server supports two transports (configured in `src/server.ts`):
 
 4. **OpenAPI** (`src/services/openapi/`) — Backing for `get_api_context`
 
-   - `load.ts` — Loads/caches the spec (file by mtime, URL by TTL)
+   - `source.ts` — Picks the spec for a call (per-call `spec` vs `--openapi` default), rejects relative paths/directories, sends the auth header only to the default spec's origin
+   - `load.ts` — Loads/caches the spec (file by mtime, URL by TTL, 10 most recent); explicit errors for HTML pages and Postman collections
    - `simplify.ts` — Swagger 2 / OAS3 → compact TS-like types; count-gated schema hoisting, cycle-safe `$ref` handling
    - `search.ts` — Lexical keyword ranking (CJK bigrams + English word stemming)
    - `src/services/get-api-context.ts` — Shared pipeline (filter, search, format) used by both the MCP tool and the `api` CLI command (`src/commands/api.ts`, for checking how a spec reads)
@@ -98,8 +99,9 @@ The server supports two transports (configured in `src/server.ts`):
 - `OUTPUT_FORMAT` or `--format` — Output format: `tree` (default), `yaml`, or `json`
 - `--json` — Back-compat alias for `--format=json`
 - `--skip-image-downloads` — Disable image download tool
-- `OPENAPI_SPEC` or `--openapi` — OpenAPI/Swagger spec (path or URL); enables `get_api_context`
-- `OPENAPI_SPEC_HEADER` or `--openapi-header` — Header used when fetching the spec URL
+- `OPENAPI_SPEC` or `--openapi` — Default OpenAPI/Swagger spec (path or URL) for `get_api_context`
+- `OPENAPI_SPEC_HEADER` or `--openapi-header` — Header used when fetching the spec URL (same origin only)
+- `OPENAPI_ALLOW_DYNAMIC` or `--openapi-allow-dynamic` — HTTP mode: accept the per-call `spec` argument (always accepted in stdio)
 
 ### Path Alias
 

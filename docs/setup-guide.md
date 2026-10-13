@@ -12,7 +12,7 @@
 1. [组成部分](#1-组成部分)
 2. [前置条件](#2-前置条件)
 3. [构建](#3-构建)
-4. [配置项](#4-配置项)
+4. [配置项](#4-配置项)（[4.1 图片目录](#41-图片目录---image-dir)、[4.2 接口文档](#42-接口文档调用时指定或配置默认值)）
 5. [运行方式：stdio 与 HTTP](#5-运行方式stdio-与-http)
 6. [各 Agent 的配置](#6-各-agent-的配置)
 7. [安装 figma-to-page Skill](#7-安装-figma-to-page-skill)
@@ -25,13 +25,13 @@
 
 ## 1. 组成部分
 
-| 部分                                           | 作用                                                                                                                                  | 是否必需                                                       |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| Framelink MCP 服务（`dist/bin.js`）            | 提供 `get_figma_data`、`download_figma_images`；配置 `--openapi` 后再提供 `get_api_context` 工具和 `implement_design_with_api` 提示词 | 必需                                                           |
-| figma-to-page Skill（`skills/figma-to-page/`） | 完整流程：项目约定、静态还原、视觉对比、找接口、绑定数据、mock/live 验收                                                              | 推荐；Agent 不支持 Skill 时见 [7.4](#74-不支持-skill-的-agent) |
-| chrome-devtools MCP                            | 截图对比、验收时检查页面、网络请求和控制台                                                                                            | 可选；没有就跳过浏览器检查                                     |
+| 部分                                           | 作用                                                                                                             | 是否必需                                                       |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Framelink MCP 服务（`dist/bin.js`）            | 提供 `get_figma_data`、`download_figma_images`，以及 `get_api_context` 工具和 `implement_design_with_api` 提示词 | 必需                                                           |
+| figma-to-page Skill（`skills/figma-to-page/`） | 完整流程：项目约定、静态还原、视觉对比、找接口、绑定数据、mock/live 验收                                         | 推荐；Agent 不支持 Skill 时见 [7.4](#74-不支持-skill-的-agent) |
+| chrome-devtools MCP                            | 截图对比、验收时检查页面、网络请求和控制台                                                                       | 可选；没有就跳过浏览器检查                                     |
 
-只想让 AI 读设计稿、不对接接口时，不配 `--openapi` 即可，此时行为与官方版本相同。
+接口文档不需要在安装时配置：AI 调用 `get_api_context` 时再指定（用户提供，或从项目里找），见 [4.2](#42-接口文档调用时指定或配置默认值)。只想让 AI 读设计稿时，不用管这个工具。
 
 ## 2. 前置条件
 
@@ -41,7 +41,7 @@
 | Git                    | 任意较新版本                                                                                  | `git --version`             |
 | Figma 访问令牌         | 个人访问令牌（PAT），或 OAuth 令牌                                                            | 见下文                      |
 | Figma 席位             | 付费计划的 **Dev 或 Full 席位**。View/Collab 席位的 Tier 1 接口按月计次，额度极少，很快会用完 | Figma 账号设置 → 计划与席位 |
-| 接口文档（对接接口时） | OpenAPI 3.x 或 Swagger 2.0，单文件，本地文件或 URL                                            | 见 [3.3](#33-检查接口文档)  |
+| 接口文档（对接接口时） | OpenAPI 3.x 或 Swagger 2.0，单文件，本地文件或 URL；可以对接时再提供                          | 见 [3.3](#33-检查接口文档)  |
 
 **创建 Figma 个人访问令牌**：Figma → 左上角头像 → Settings → Security → Personal access tokens → Generate new token。权限至少勾选 **File content: Read-only**。令牌只显示一次，请立即保存。详见 [Figma 帮助文档](https://help.figma.com/hc/en-us/articles/8085703771159-Manage-personal-access-tokens)。
 
@@ -89,25 +89,26 @@ node dist/bin.js api --openapi ./openapi.yaml --keywords "订单列表,实付金
 
 每个配置项都可以用命令行参数或环境变量指定，**命令行参数优先**。
 
-| 命令行参数               | 环境变量                                      | 说明                                                                         | 默认值              |
-| ------------------------ | --------------------------------------------- | ---------------------------------------------------------------------------- | ------------------- |
-| `--figma-api-key`        | `FIGMA_API_KEY`                               | Figma 个人访问令牌                                                           | —                   |
-| `--figma-oauth-token`    | `FIGMA_OAUTH_TOKEN`                           | Figma OAuth 令牌；设置后优先于个人访问令牌                                   | —                   |
-| `--stdio`                | —                                             | stdio 模式（Agent 启动子进程时必须加）                                       | HTTP 模式           |
-| `--openapi`              | `OPENAPI_SPEC`                                | 接口文档的文件路径或 URL，配置后启用 `get_api_context`                       | 不启用              |
-| `--openapi-header`       | `OPENAPI_SPEC_HEADER`                         | 拉取文档 URL 时附带的请求头，如 `Authorization: Bearer xxx`                  | —                   |
-| `--image-dir`            | `IMAGE_DIR`                                   | 图片下载的根目录，下载工具只会写入这个目录                                   | 服务进程的当前目录  |
-| `--format`               | `OUTPUT_FORMAT`                               | 设计稿输出格式：`tree`、`yaml`、`json`                                       | `tree`              |
-| `--skip-image-downloads` | `SKIP_IMAGE_DOWNLOADS`                        | 不注册图片下载工具                                                           | 否                  |
-| `--proxy`                | `FIGMA_PROXY`                                 | 代理地址；`none` 表示忽略系统代理变量。也支持标准的 `HTTPS_PROXY`/`NO_PROXY` | —                   |
-| `--port`                 | `FRAMELINK_PORT` 或 `PORT`                    | HTTP 模式端口                                                                | 3333                |
-| `--host`                 | `FRAMELINK_HOST`                              | HTTP 模式监听地址                                                            | 127.0.0.1           |
-| `--env`                  | —                                             | 指定 `.env` 文件                                                             | 当前目录下的 `.env` |
-| `--no-telemetry`         | `FRAMELINK_TELEMETRY=off` 或 `DO_NOT_TRACK=1` | 关闭使用统计（**默认开启**）                                                 | 开启                |
+| 命令行参数                | 环境变量                                      | 说明                                                                                             | 默认值              |
+| ------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------- |
+| `--figma-api-key`         | `FIGMA_API_KEY`                               | Figma 个人访问令牌                                                                               | —                   |
+| `--figma-oauth-token`     | `FIGMA_OAUTH_TOKEN`                           | Figma OAuth 令牌；设置后优先于个人访问令牌                                                       | —                   |
+| `--stdio`                 | —                                             | stdio 模式（Agent 启动子进程时必须加）                                                           | HTTP 模式           |
+| `--openapi`               | `OPENAPI_SPEC`                                | **默认**接口文档的文件路径或 URL。可以不配，由 AI 在调用时指定，见 4.2                           | —                   |
+| `--openapi-header`        | `OPENAPI_SPEC_HEADER`                         | 拉取默认文档 URL 时附带的请求头，如 `Authorization: Bearer xxx`。只发给与 `--openapi` 同源的地址 | —                   |
+| `--openapi-allow-dynamic` | `OPENAPI_ALLOW_DYNAMIC=true`                  | HTTP 模式下允许 AI 在调用时指定接口文档（stdio 模式始终允许）                                    | 否                  |
+| `--image-dir`             | `IMAGE_DIR`                                   | 图片下载的根目录，下载工具只会写入这个目录                                                       | 服务进程的当前目录  |
+| `--format`                | `OUTPUT_FORMAT`                               | 设计稿输出格式：`tree`、`yaml`、`json`                                                           | `tree`              |
+| `--skip-image-downloads`  | `SKIP_IMAGE_DOWNLOADS`                        | 不注册图片下载工具                                                                               | 否                  |
+| `--proxy`                 | `FIGMA_PROXY`                                 | 代理地址；`none` 表示忽略系统代理变量。也支持标准的 `HTTPS_PROXY`/`NO_PROXY`                     | —                   |
+| `--port`                  | `FRAMELINK_PORT` 或 `PORT`                    | HTTP 模式端口                                                                                    | 3333                |
+| `--host`                  | `FRAMELINK_HOST`                              | HTTP 模式监听地址                                                                                | 127.0.0.1           |
+| `--env`                   | —                                             | 指定 `.env` 文件                                                                                 | 当前目录下的 `.env` |
+| `--no-telemetry`          | `FRAMELINK_TELEMETRY=off` 或 `DO_NOT_TRACK=1` | 关闭使用统计（**默认开启**）                                                                     | 开启                |
 
 **路径一律写绝对路径**：`--openapi`（本地文件）、`--image-dir`、`--env` 的相对路径按服务进程的当前目录解析。各 Agent 启动子进程时的当前目录不一样（有的是项目目录，有的是用户目录或 Agent 的安装目录），写相对路径很容易指错地方。
 
-**`--image-dir` 建议设为前端项目根目录**：Skill 下载的图片和 `.figma-ref/` 参考图都会放在这个目录下。多个项目共用一份全局配置时，可以在每个项目的配置里单独设置（见各 Agent 的项目级配置）。
+**`--image-dir` 建议设为前端项目根目录**，原因和设置方法见 [4.1](#41-图片目录---image-dir)。
 
 **`.env` 文件会覆盖 Agent 配置里的 `env`**：服务启动时会读当前目录（或 `--env` 指定）的 `.env`，并且**覆盖**已有的同名环境变量。如果服务的当前目录里恰好有一个 `.env`（例如前端项目自己的 `.env` 里也有 `PORT`），Agent 配置里的同名 `env` 会失效。用命令行参数（优先级最高）可以避开这个问题。
 
@@ -115,6 +116,64 @@ node dist/bin.js api --openapi ./openapi.yaml --keywords "订单列表,实付金
 
 - 不要把含令牌的配置文件提交到仓库。项目级配置（`.mcp.json`、`.cursor/mcp.json`、`.vscode/mcp.json` 等）如果要提交，令牌改用环境变量引用或输入提示（各 Agent 的写法见下文）。
 - 也可以把令牌写进一个单独的 `.env` 文件，用 `--env=<绝对路径>` 指定，这个文件不进仓库。
+
+### 4.1 图片目录 `--image-dir`
+
+`--image-dir` 是 `download_figma_images` 工具保存文件的**根目录**，工具只能往这个目录里面写文件。
+
+**存放的内容**：
+
+1. **设计稿里的图片和图标**：照片、插画、背景图（PNG），以及图标（SVG）。AI 写页面时会把它们下载到前端项目的资源目录，如 `src/assets/icons/`。
+2. **视觉对比用的参考图**：figma-to-page Skill 会把整个页面渲染成一张 PNG，放在 `.figma-ref/` 里，和浏览器截图做对比。
+
+**路径规则**：AI 调用工具时会传一个 `localPath`（如 `src/assets/icons`），它是**相对 `--image-dir` 的路径**，文件实际保存在 `<image-dir>/<localPath>`。`localPath` 也可以是绝对路径，但必须在 `--image-dir` 里面。指向目录外面的路径（如 `../../`）会被拒绝，这样可以防止 AI 把文件写到任意位置。
+
+**不设置时**：默认使用服务进程的**当前目录**。各 Agent 启动 MCP 子进程时的当前目录不一样（项目目录、用户目录或 Agent 的安装目录都有可能），所以图片常常会下载到意想不到的地方。工具返回的消息里有实际保存的绝对路径，可以从那里查。
+
+**设置方法**：一般设成**前端项目根目录的绝对路径**，如 `--image-dir=E:/work/shop-web`。这样 AI 传的 `src/assets/...`、`.figma-ref/` 正好对应项目里的目录。
+
+| 情况                   | 做法                                                                                                                                                                                                                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 只有一个前端项目       | 在全局配置里直接加 `--image-dir=<项目根目录>`                                                                                                                                                                                                                                               |
+| 多个前端项目           | 全局配置不带 `--image-dir`，在每个项目的项目级配置里单独配一份带 `--image-dir` 的服务（Claude Code：在项目目录下运行 `claude mcp add framelink --scope local -- node <BIN> --stdio ... --image-dir=<该项目根目录>`，它会覆盖用户级的同名服务）。只有全局配置的 Agent 见 [6.6](#66-windsurf) |
+| 不想让 AI 改动项目目录 | 设成一个专用目录（如 `E:/figma-assets`），下载后自己挑选文件复制到项目里                                                                                                                                                                                                                    |
+
+另外，在前端项目的 `.gitignore` 里加上 `.figma-ref/`，那里面是参考图和截图，不需要提交。
+
+### 4.2 接口文档：调用时指定或配置默认值
+
+`get_api_context` 每次调用用哪份接口文档，按下面的顺序决定：
+
+1. **调用时的 `spec` 参数**：文件的绝对路径或文档的 URL。
+2. **服务配置的默认文档** `--openapi`：调用时没带 `spec` 就用它。
+3. **都没有**：工具返回错误，让 AI 先在项目约定和项目文件里找，找不到就问用户。
+
+所以一般**不用在安装时配置 `--openapi`**。对接接口时，直接告诉 AI 文档在哪里，例如「接口文档是 E:/work/shop-web/docs/api/swagger.json」；不说的话，AI 会自己找或者问你。figma-to-page Skill 会把确定下来的位置写进项目约定 `docs/frontend-conventions.md` 的「接口文档」一节，之后同一个项目不用再说。
+
+**什么时候配置 `--openapi`**：所有项目都用同一份文档，或者文档 URL 需要认证（`--openapi-header` 只发给 `--openapi` 同源的地址）。
+
+**推荐用导出的单文件**：后端服务不用开着，文档也不会因为后端重启而读不到。各工具的导出方法：
+
+| 来源                       | 方法                                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------ |
+| Swagger UI 页面            | 页面标题下方有文档链接（如 `/v3/api-docs`、`/swagger.json`），打开后另存为文件       |
+| springdoc（Spring Boot 3） | `/v3/api-docs`（JSON）或 `/v3/api-docs.yaml`（YAML）；分组用 `/v3/api-docs/<分组名>` |
+| springfox（老项目）        | `/v2/api-docs`；分组用 `?group=<分组名>`                                             |
+| knife4j（`doc.html`）      | 「文档管理 → 离线文档」，选 OpenAPI 格式导出                                         |
+| FastAPI                    | `/openapi.json`                                                                      |
+| Swagger Editor             | File → Save as JSON / YAML                                                           |
+| Apifox / YApi / Postman    | 导出为 OpenAPI 3.0 或 Swagger 2.0（Postman 的「Collection」格式不能用）              |
+
+注意：
+
+- **路径写绝对路径**。相对路径会被拒绝，因为它会按服务进程的当前目录解析，而不是项目目录。
+- **文件放在哪里都可以**。放进前端项目（如 `docs/api/swagger.json`）并提交，团队里每个人都能用；文档里可能有内部信息时，不要提交。
+- **后端改了接口要重新导出**。覆盖原来的文件即可，下一次调用就会用新内容，不用重启 Agent。
+- **多文件文档要先合并**。主文件里有 `$ref: ./schemas/Order.yaml` 这类引用时，工具结果里会有 `warning`，被引用的部分显示为 `unresolved(...)`。合并命令：`npx @redocly/cli bundle openapi.yaml -o openapi.bundled.yaml`。
+- **有多个分组或多个服务**：每个分组是一份单独的文档。一次调用只读一份，页面用到哪个分组的接口，就给哪一份。
+- **给错文件时工具会说明原因**：Swagger UI 等 HTML 页面、Postman 集合、目录（会列出目录里的 JSON/YAML 文件）、相对路径。
+
+**HTTP 模式**：服务可能被多人共用，默认**不接受** `spec` 参数，只用 `--openapi`。确认只有自己能访问这个服务时，可以加 `--openapi-allow-dynamic` 放开。
 
 ## 5. 运行方式：stdio 与 HTTP
 
@@ -139,12 +198,12 @@ Agent 里配置的地址是 `http://127.0.0.1:3333/mcp`（`/sse` 也指向同一
 
 下面的例子统一使用这些占位值，请换成自己的：
 
-| 占位        | 含义                      | 例子                                                               |
-| ----------- | ------------------------- | ------------------------------------------------------------------ |
-| `<BIN>`     | `dist/bin.js` 的绝对路径  | `E:\\Library\\github.com\\figmma\\Figma-Context-MCP\\dist\\bin.js` |
-| `<TOKEN>`   | Figma 令牌                | `figd_xxx`                                                         |
-| `<SPEC>`    | 接口文档的 URL 或绝对路径 | `http://localhost:8080/v3/api-docs`                                |
-| `<PROJECT>` | 前端项目根目录的绝对路径  | `E:\\work\\shop-web`                                               |
+| 占位        | 含义                                                                                        | 例子                                                               |
+| ----------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `<BIN>`     | `dist/bin.js` 的绝对路径                                                                    | `E:\\Library\\github.com\\figmma\\Figma-Context-MCP\\dist\\bin.js` |
+| `<TOKEN>`   | Figma 令牌                                                                                  | `figd_xxx`                                                         |
+| `<SPEC>`    | 默认接口文档的 URL 或绝对路径（**可选**，不需要时删掉整个 `--openapi=<SPEC>` 参数，见 4.2） | `http://localhost:8080/v3/api-docs`                                |
+| `<PROJECT>` | 前端项目根目录的绝对路径                                                                    | `E:\\work\\shop-web`                                               |
 
 JSON 里的 Windows 路径要把 `\` 写成 `\\`，或者直接用 `/`（`E:/work/shop-web`），Node 都能识别。
 
@@ -381,7 +440,7 @@ Windows 的目录链接（junction）提交到 Git 后，在其他电脑上不�
 
 有两种替代方式：
 
-1. **用 MCP 提示词**：配置了 `--openapi` 后，服务会提供 `implement_design_with_api` 提示词（参数是 Figma 链接），包含精简版流程。支持 MCP prompts 的 Agent 一般在输入 `/` 时能看到它。
+1. **用 MCP 提示词**：服务提供 `implement_design_with_api` 提示词（参数是 Figma 链接和可选的接口文档位置），包含精简版流程。支持 MCP prompts 的 Agent 一般在输入 `/` 时能看到它。
 2. **用规则文件引用 Skill**：把 `skills/figma-to-page/` 复制到项目里（如 `docs/figma-to-page/`），在 Agent 的规则文件（如 Windsurf 的 `.windsurf/rules/`、Cline 的 `.clinerules`）中写一句：「实现 Figma 设计稿或对接接口时，先阅读并遵循 `docs/figma-to-page/SKILL.md`」。
 
 ## 8. 配置 chrome-devtools MCP（验收用）
@@ -398,10 +457,10 @@ claude mcp add chrome-devtools -- npx -y chrome-devtools-mcp@latest
 
 | #   | 检查                                                                                                | 预期                                                                                    |
 | --- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| 1   | `node <BIN> --help`                                                                                 | 有 `--openapi` 参数和 `api` 命令                                                        |
+| 1   | `node <BIN> --help`                                                                                 | 有 `--openapi`、`--openapi-allow-dynamic` 参数和 `api` 命令                             |
 | 2   | `node <BIN> api --openapi <SPEC>`                                                                   | 列出接口，不报错                                                                        |
 | 3   | Agent 的 MCP 面板或 `/mcp`                                                                          | `framelink` 已连接；工具有 `get_figma_data`、`download_figma_images`、`get_api_context` |
-| 4   | 对 Agent 说「用 get_api_context 查一下订单相关的接口」                                              | 返回候选接口，带 `matched`                                                              |
+| 4   | 对 Agent 说「用 get_api_context 查一下 <SPEC> 里订单相关的接口」                                    | 返回候选接口，带 `matched`                                                              |
 | 5   | 对 Agent 说「用 get_figma_data 读一下 <Figma 链接>，depth 1」                                       | 返回设计稿结构                                                                          |
 | 6   | Skill 是否被识别（Claude Code 问「有哪些 skill」；Gemini CLI `/skills list`；Cursor 输入 `/` 搜索） | 能看到 `figma-to-page`                                                                  |
 | 7   | 让 Agent 下载一个图标                                                                               | 文件出现在 `<PROJECT>` 下，而不是别的目录                                               |
@@ -423,20 +482,24 @@ npx pnpm@10.10.0 build
 
 ## 11. 常见问题
 
-| 问题                                                                         | 原因                                                        | 解决办法                                                                         |
-| ---------------------------------------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| 看不到 `get_api_context`                                                     | 没配 `--openapi`；或者启动的是 npm 上的官方版本             | 检查命令是 `node <BIN>`，参数里有 `--openapi`                                    |
-| 服务连不上，日志里有 `Either FIGMA_API_KEY or FIGMA_OAUTH_TOKEN is required` | stdio 模式启动时没拿到令牌                                  | 用 `--figma-api-key` 传入；检查 `env` 写法是否被该 Agent 支持                    |
-| 服务连不上，没有任何日志                                                     | 漏了 `--stdio`；或 `node` 不在 Agent 的 PATH 里             | 加 `--stdio`；`command` 改成 node 的绝对路径（`where node` / `which node` 查看） |
-| 配置的 `env` 不生效                                                          | 服务当前目录下的 `.env` 覆盖了它                            | 改用命令行参数，或用 `--env` 指向专用的 `.env` 文件                              |
-| `get_api_context` 报 `ENOENT`                                                | `--openapi` 写了相对路径，按 Agent 启动目录解析，找不到文件 | 改成绝对路径                                                                     |
-| 图片下载到了奇怪的目录                                                       | 没配 `--image-dir`，默认是服务进程的当前目录                | 配置 `--image-dir=<PROJECT>`；工具返回的消息里有实际保存的绝对路径               |
-| 改了代码或重新构建后没变化                                                   | Agent 还在用旧进程                                          | 重启 Agent 或在 MCP 面板重启服务                                                 |
-| Codex 启动服务超时                                                           | 默认 10 秒，第一次拉取远程文档较慢                          | `startup_timeout_sec = 30`                                                       |
-| Codex 不认 Skill                                                             | 放在了 `.claude/skills/`                                    | 放到 `.agents/skills/`                                                           |
-| Cursor、VS Code 里出现两个 figma-to-page                                     | `.agents/skills/` 和 `.claude/skills/` 各有一份             | 只保留一份，另一处用链接                                                         |
-| 公司网络连不上 Figma 或接口文档                                              | 需要代理                                                    | `--proxy=http://代理:端口`，或设置 `HTTPS_PROXY`                                 |
-| 不想发送使用统计                                                             | 默认开启                                                    | 加 `--no-telemetry`，或设置 `FRAMELINK_TELEMETRY=off`                            |
+| 问题                                                                         | 原因                                                                                             | 解决办法                                                                         |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| 看不到 `get_api_context`                                                     | 启动的是 npm 上的官方版本；或者是 HTTP 模式，既没配 `--openapi` 也没加 `--openapi-allow-dynamic` | 检查命令是 `node <BIN>`；HTTP 模式按 4.2 处理                                    |
+| AI 说没有接口文档、问文档在哪                                                | 调用时没给 `spec`，也没有默认文档                                                                | 告诉它文档的绝对路径或 URL；用 Skill 时它会记进项目约定                          |
+| 报 `is an HTML/XML page`                                                     | 给的是 Swagger UI 等网页，不是文档本身                                                           | 按 4.2 的表格导出文档文件，或者给文档的 URL                                      |
+| 结果里有 `warning`，提到 `split across files`                                | 文档拆成了多个文件                                                                               | 用 `npx @redocly/cli bundle` 合并成一个文件                                      |
+| 报 `does not accept` 或 `only serves its configured`                         | HTTP 模式默认不接受调用时指定文档                                                                | 用 `--openapi` 配置，或加 `--openapi-allow-dynamic`                              |
+| 服务连不上，日志里有 `Either FIGMA_API_KEY or FIGMA_OAUTH_TOKEN is required` | stdio 模式启动时没拿到令牌                                                                       | 用 `--figma-api-key` 传入；检查 `env` 写法是否被该 Agent 支持                    |
+| 服务连不上，没有任何日志                                                     | 漏了 `--stdio`；或 `node` 不在 Agent 的 PATH 里                                                  | 加 `--stdio`；`command` 改成 node 的绝对路径（`where node` / `which node` 查看） |
+| 配置的 `env` 不生效                                                          | 服务当前目录下的 `.env` 覆盖了它                                                                 | 改用命令行参数，或用 `--env` 指向专用的 `.env` 文件                              |
+| `get_api_context` 报 `ENOENT` 或 `relative path`                             | 文档路径写了相对路径                                                                             | 改成绝对路径                                                                     |
+| 图片下载到了奇怪的目录                                                       | 没配 `--image-dir`，默认是服务进程的当前目录                                                     | 配置 `--image-dir=<PROJECT>`；工具返回的消息里有实际保存的绝对路径               |
+| 改了代码或重新构建后没变化                                                   | Agent 还在用旧进程                                                                               | 重启 Agent 或在 MCP 面板重启服务                                                 |
+| Codex 启动服务超时                                                           | 默认 10 秒，第一次拉取远程文档较慢                                                               | `startup_timeout_sec = 30`                                                       |
+| Codex 不认 Skill                                                             | 放在了 `.claude/skills/`                                                                         | 放到 `.agents/skills/`                                                           |
+| Cursor、VS Code 里出现两个 figma-to-page                                     | `.agents/skills/` 和 `.claude/skills/` 各有一份                                                  | 只保留一份，另一处用链接                                                         |
+| 公司网络连不上 Figma 或接口文档                                              | 需要代理                                                                                         | `--proxy=http://代理:端口`，或设置 `HTTPS_PROXY`                                 |
+| 不想发送使用统计                                                             | 默认开启                                                                                         | 加 `--no-telemetry`，或设置 `FRAMELINK_TELEMETRY=off`                            |
 
 更多和使用流程有关的问题，见 [figma-to-page-guide.md](figma-to-page-guide.md) 第 7 节。
 

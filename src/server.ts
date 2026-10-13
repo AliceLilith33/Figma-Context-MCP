@@ -70,6 +70,7 @@ export async function startServer(config: ServerConfig): Promise<void> {
     skipImageDownloads: config.skipImageDownloads,
     imageDir: config.imageDir,
     openapi: config.openapi,
+    openapiAllowDynamic: config.openapiAllowDynamic,
   };
 
   if (config.isStdioMode) {

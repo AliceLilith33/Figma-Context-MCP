@@ -10,13 +10,13 @@
 
 设计边界（已确认）：
 
-| 决定             | 内容                                            |
-| ---------------- | ----------------------------------------------- |
-| 接口来源         | OpenAPI 3.x / Swagger 2.0 文档，本地文件或 URL  |
-| UI ↔ 字段对应   | 由 AI 推断，设计师无需做标注                    |
-| Framelink 的职责 | **只提供上下文**，不生成代码，不访问后端服务    |
-| 验收后端         | 同时支持 mock（MSW）与 live（真实开发环境后端） |
-| 像素级对比       | 按需使用                                        |
+| 决定             | 内容                                                                                                                          |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| 接口来源         | OpenAPI 3.x / Swagger 2.0 文档，本地文件或 URL；由 AI 在调用时指定（用户提供或从项目里找），服务配置的 `--openapi` 作为默认值 |
+| UI ↔ 字段对应   | 由 AI 推断，设计师无需做标注                                                                                                  |
+| Framelink 的职责 | **只提供上下文**，不生成代码，不访问后端服务                                                                                  |
+| 验收后端         | 同时支持 mock（MSW）与 live（真实开发环境后端）                                                                               |
+| 像素级对比       | 按需使用                                                                                                                      |
 
 ## 2. 整体结构
 
@@ -24,8 +24,8 @@
                       ┌──────────────────────── Framelink MCP ────────────────────────┐
  Figma REST API ────► │ get_figma_data / download_figma_images（原有）                 │
                       │                                                                │
- OpenAPI 文档 ──────► │ get_api_context（新增，仅配置 --openapi 时注册）              │
- (文件 / URL)         │   load.ts → simplify.ts → search.ts → get-api-context.ts       │
+ OpenAPI 文档 ──────► │ get_api_context（新增；文档由调用参数 spec 或 --openapi 指定） │
+ (文件 / URL)         │   source.ts → load.ts → simplify.ts → search.ts → 输出         │
                       │ implement_design_with_api 提示词（新增，最简兜底流程）         │
                       └───────────────────────────────┬────────────────────────────────┘
                                                       │ 工具调用
@@ -44,54 +44,80 @@
 
 ### 新增
 
-| 文件                                                            | 作用                                              |
-| --------------------------------------------------------------- | ------------------------------------------------- |
-| `src/services/openapi/load.ts`                                  | 读取并缓存 OpenAPI 文档                           |
-| `src/services/openapi/simplify.ts`                              | 把 OpenAPI 精简成紧凑的类 TypeScript 表示         |
-| `src/services/openapi/search.ts`                                | 按设计稿关键词给接口打分排序                      |
-| `src/services/get-api-context.ts`                               | 串起加载→精简→筛选→序列化；MCP 工具与 CLI 共用    |
-| `src/mcp/tools/get-api-context-tool.ts`                         | MCP 工具 `get_api_context`                        |
-| `src/mcp/prompts/implement-design-with-api.ts`                  | MCP 提示词 `implement_design_with_api`            |
-| `src/commands/api.ts`                                           | CLI 调试命令 `api`                                |
-| `src/tests/api-context.test.ts`、`src/tests/fixtures/openapi/*` | 测试与样例文档（OpenAPI 3 YAML + Swagger 2 JSON） |
-| `skills/figma-to-page/`                                         | Skill：`SKILL.md`、4 篇参考文档、2 个脚本         |
+| 文件                                                            | 作用                                                                            |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `src/services/openapi/source.ts`                                | 确定本次调用用哪份文档（`spec` 参数或默认配置），检查路径，限制请求头的发送范围 |
+| `src/services/openapi/load.ts`                                  | 读取并缓存 OpenAPI 文档                                                         |
+| `src/services/openapi/simplify.ts`                              | 把 OpenAPI 精简成紧凑的类 TypeScript 表示                                       |
+| `src/services/openapi/search.ts`                                | 按设计稿关键词给接口打分排序                                                    |
+| `src/services/get-api-context.ts`                               | 串起加载→精简→筛选→序列化；MCP 工具与 CLI 共用                                  |
+| `src/mcp/tools/get-api-context-tool.ts`                         | MCP 工具 `get_api_context`                                                      |
+| `src/mcp/prompts/implement-design-with-api.ts`                  | MCP 提示词 `implement_design_with_api`                                          |
+| `src/commands/api.ts`                                           | CLI 调试命令 `api`                                                              |
+| `src/tests/api-context.test.ts`、`src/tests/fixtures/openapi/*` | 测试与样例文档（OpenAPI 3 YAML + Swagger 2 JSON）                               |
+| `skills/figma-to-page/`                                         | Skill：`SKILL.md`、4 篇参考文档、2 个脚本                                       |
 
 ### 修改
 
-| 文件                     | 改动                                                                                                     |
-| ------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `src/config.ts`          | 新增 `--openapi`/`OPENAPI_SPEC`、`--openapi-header`/`OPENAPI_SPEC_HEADER`；新增 `resolveOpenApiSource()` |
-| `src/bin.ts`             | 注册上述参数与 `api` 子命令                                                                              |
-| `src/server.ts`          | 把 `openapi` 配置传给 MCP 服务                                                                           |
-| `src/mcp/index.ts`       | 配置了 `openapi` 才注册新工具和提示词                                                                    |
-| `src/mcp/tools/index.ts` | 导出新工具                                                                                               |
-| `eslint.config.js`       | `skills/**/scripts/*.mjs` 使用 Node 全局变量                                                             |
-| `README.md`、`CLAUDE.md` | 使用说明与架构说明                                                                                       |
+| 文件                     | 改动                                                                                                                                                        |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/config.ts`          | 新增 `--openapi`/`OPENAPI_SPEC`、`--openapi-header`/`OPENAPI_SPEC_HEADER`、`--openapi-allow-dynamic`/`OPENAPI_ALLOW_DYNAMIC`；新增 `resolveOpenApiSource()` |
+| `src/bin.ts`             | 注册上述参数与 `api` 子命令                                                                                                                                 |
+| `src/server.ts`          | 把 `openapi` 配置传给 MCP 服务                                                                                                                              |
+| `src/mcp/index.ts`       | 注册新工具和提示词：stdio 模式始终注册；HTTP 模式下配置了默认文档或开启 `--openapi-allow-dynamic` 才注册                                                    |
+| `src/mcp/tools/index.ts` | 导出新工具                                                                                                                                                  |
+| `eslint.config.js`       | `skills/**/scripts/*.mjs` 使用 Node 全局变量                                                                                                                |
+| `README.md`、`CLAUDE.md` | 使用说明与架构说明                                                                                                                                          |
 
 **没有新增任何 npm 依赖**（YAML/JSON 解析复用已有的 `js-yaml`）。
 
 ## 4. `get_api_context` 工作原理
 
-### 4.1 配置与注册
+### 4.1 指定接口文档
+
+每次调用用哪份文档，按以下顺序决定（`source.ts`）：
+
+1. **调用参数 `spec`**：文件的绝对路径（如用户导出的 `swagger.json`），或文档本身的 URL。AI 从用户的话、项目约定或项目里的文件得到它，每次调用都要带上（HTTP 模式下每个请求都新建服务实例，服务端记不住）。
+2. **服务配置的默认文档** `--openapi`/`OPENAPI_SPEC`：不带 `spec` 时使用。
+3. **两者都没有**：返回错误，告诉 AI 先查项目约定和项目里的 `openapi.*`/`swagger.*`/`api-docs*.json`，再找不到就**问用户**，不要猜。
 
 ```bash
-node dist/bin.js --stdio --figma-api-key=XXX --openapi=./openapi.yaml
+# 不配默认文档，由 AI 在调用时指定
+node dist/bin.js --stdio --figma-api-key=XXX
+# 配一份默认文档；需要认证的 URL 可以带一个请求头
 node dist/bin.js --stdio --figma-api-key=XXX --openapi=http://localhost:8080/v3/api-docs \
   --openapi-header="Authorization: Bearer xxx"
 ```
 
-- 优先级：命令行参数 → 环境变量 → 无。
-- 本地路径在启动时转成绝对路径，避免工作目录变化后指向别的文件。
-- **未配置时不注册工具和提示词**，原有行为完全不变。
-- 文档地址**只能由配置给出，工具参数不接受 URL**：防止 AI 被设计稿或网页中的注入内容诱导去访问任意地址。
+对 `spec` 的检查：
+
+| 情况           | 处理                                                                                  |
+| -------------- | ------------------------------------------------------------------------------------- |
+| 相对路径       | 拒绝。相对路径会按服务进程的当前目录解析，而不是项目目录                              |
+| 目录           | 拒绝，并列出目录中的 JSON/YAML 文件（名字像接口文档的排在前面），方便 AI 选择或问用户 |
+| 文件不存在     | 拒绝                                                                                  |
+| `file://` URL  | 转成本地路径                                                                          |
+| 与默认文档相同 | 当作没传，用默认配置（包括请求头）；本地路径的斜杠写法不同也算相同                    |
+
+**安全上的考虑**：工具参数接受文件路径和 URL，意味着 AI 可能被设计稿、网页里的注入内容诱导去读别的文件或地址。对应的限制：
+
+- `--openapi-header` 的请求头**只发给与默认文档同源的地址**，其他地址不带请求头，令牌不会被送到别处。需要认证的其他文档，让用户导出成文件。
+- 读到的内容必须能解析成 OpenAPI 才会返回；解析失败的报错不引用原文，所以读错文件不会把文件内容带出来。
+- **HTTP 模式默认不接受 `spec`**：HTTP 服务可能被多人共用，接受 `spec` 等于让任何能访问它的人读取服务器上的文件、访问服务器所在的内网。需要时加 `--openapi-allow-dynamic`（`OPENAPI_ALLOW_DYNAMIC=true`），只在别人访问不到的服务上开启。HTTP 模式下既没有默认文档、又没开启这个选项时，不注册该工具。stdio 模式下 AI 本来就能读本地文件、访问网络，`spec` 不增加新的能力，所以默认接受。
+- 本地默认文档的路径在启动时转成绝对路径。
+- 配置了默认文档时，工具说明里会写出它的位置（URL 去掉查询参数），AI 据此判断是否就是用户说的那份，生成 mock 时也用同一个地址，不需要去读含令牌的 MCP 配置文件。
 
 ### 4.2 加载（`load.ts`）
 
 1. 本地文件读文本；URL 用 `fetch` 拉取，可带一个请求头，30 秒超时。MCP 服务会沿用 Framelink 已有的代理设置（`--proxy` / `HTTPS_PROXY`）；`api` 调试命令不走代理。
 2. 用 `js-yaml` 的 `CORE_SCHEMA` 解析——YAML 是 JSON 的超集，一个解析器处理两种格式；`CORE_SCHEMA` 避免把未加引号的日期示例转成 Date 对象。
 3. 校验必须有 `openapi: 3.x` 或 `swagger: "2.0"`（不带引号的 `swagger: 2.0` 也接受），且有 `paths`。
-4. **缓存在模块级**：本地文件按修改时间（mtime）失效，URL 每 60 秒最多重新拉取一次；重新拉取失败时继续用已缓存的版本（开发环境后端重启不影响正在进行的会话）。之所以不放在服务实例里，是因为 HTTP 模式下每个请求都会新建一个 MCP 服务实例。
-5. 错误信息**不包含响应体**，URL 的查询参数也会去掉：内部文档服务器的错误页可能回显请求头（即鉴权信息）。地址返回 200 但内容是网页（Swagger UI、登录页）时，解析错误只报行列号，不引用原文。
+4. **缓存在模块级**，最多保留最近用过的 10 份文档：本地文件按修改时间（mtime）失效（覆盖导出同一个文件后，下一次调用就会用新内容），URL 每 60 秒最多重新拉取一次；重新拉取失败时继续用已缓存的版本（开发环境后端重启不影响正在进行的会话）。之所以不放在服务实例里，是因为 HTTP 模式下每个请求都会新建一个 MCP 服务实例。
+5. 错误信息**不包含响应体**，URL 的查询参数也会去掉：内部文档服务器的错误页可能回显请求头（即鉴权信息）。
+6. **常见的错误文件给出明确提示**，而不是笼统的解析错误：
+   - 内容以 `<` 开头（Swagger UI、Redoc、knife4j 页面另存的 HTML，或登录页）：提示用页面标题下方的文档链接，或从 knife4j 导出 OpenAPI 格式的离线文档。
+   - Postman 导出的集合：提示改为导出 OpenAPI 3 或 Swagger 2.0。
+   - 其他解析失败只报行列号，不引用原文。
 
 ### 4.3 精简（`simplify.ts`）
 
@@ -121,7 +147,7 @@ node dist/bin.js --stdio --figma-api-key=XXX --openapi=http://localhost:8080/v3/
 - **响应**：只取成功响应（优先 200/201/202/204），非 200 时注明 `responseStatus`；错误响应只保留有实际信息的说明（「Bad Request」这类只是复述状态码的会被丢弃）。
 - **鉴权**：全局鉴权方式写在 `api.auth`；单个接口只有与全局不同时才写 `auth`（如登录接口 `auth: none`）。
 - **丢弃**：完整 examples、externalDocs、`x-*` 扩展、安全细节——对写页面没有帮助。
-- **外部引用**（`other.yaml#/...`）不解析，输出 `unresolved(...)` 而不是让整个调用失败；文档要求使用单文件。指向子结构的引用（`#/components/schemas/X/properties/y`）形成循环时输出 `circular(...)`。
+- **外部引用**（`./schemas/Order.yaml`、`other.yaml#/...`）不解析，输出 `unresolved(...)` 而不是让整个调用失败；同时在结果里加 `warning`，说明文档拆成了多个文件，请用户提供单文件或用 `npx @redocly/cli bundle` 合并。不自动跟随外部引用，是因为那等于按文档内容去读任意文件或地址。指向子结构的引用（`#/components/schemas/X/properties/y`）形成循环时输出 `circular(...)`。
 
 ### 4.4 搜索（`search.ts`）
 
@@ -141,6 +167,7 @@ node dist/bin.js --stdio --figma-api-key=XXX --openapi=http://localhost:8080/v3/
 
 | 参数                 | 作用                                                                                                                   |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `spec`               | 接口文档的绝对路径或 URL；不传时用服务配置的默认文档（见 4.1）                                                         |
 | `keywords`           | 按相关度排序                                                                                                           |
 | `operationIds`       | 取指定接口；可写 operationId 或 `GET /orders/{id}`（不区分大小写）                                                     |
 | `tags`、`pathPrefix` | 精确过滤                                                                                                               |
@@ -149,13 +176,13 @@ node dist/bin.js --stdio --figma-api-key=XXX --openapi=http://localhost:8080/v3/
 
 - 不带任何条件、且 `detail` 为 `index` 时，额外输出按 tag 的接口计数，帮助 AI 缩小范围。
 - `full` 模式只附带这些接口**传递引用到的** schema，不输出整份 `schemas`。
-- 结果被截断时给出 `truncated` 提示；不存在的 operationId 列在 `notFound`；关键词无命中时给出 `hint`。
+- 结果被截断时给出 `truncated` 提示；不存在的 operationId 列在 `notFound`；关键词无命中时给出 `hint`；文档有外部引用时给出 `warning`。
 - 精简与索引结果按文档对象缓存（WeakMap），同一版本的文档只计算一次。
 - 输出格式跟随全局 `--format`：`json` 输出 JSON，其他情况输出 YAML（`tree` 格式是 Figma 节点树专用的）。
 
 ### 4.6 提示词与 CLI
 
-- **`implement_design_with_api` 提示词**：最简的 5 步流程，作为没有 Skill 的项目的兜底；项目中有 `figma-to-page` Skill 时提示 AI 以 Skill 为准。完整流程只在 Skill 里写一次，避免多处内容逐渐不一致。
+- **`implement_design_with_api` 提示词**：参数是 Figma 链接和可选的 `spec`。最简的 5 步流程，没给 `spec` 时要求 AI 先确定文档、确定不了就问用户；作为没有 Skill 的项目的兜底；项目中有 `figma-to-page` Skill 时提示 AI 以 Skill 为准。完整流程只在 Skill 里写一次，避免多处内容逐渐不一致。
 - **`api` 命令**：打印 `get_api_context` 会返回的内容，用于检查文档质量、调试关键词：
   ```bash
   node dist/bin.js api --openapi ./openapi.yaml --keywords "我的订单,实付金额"
@@ -242,9 +269,9 @@ skills/figma-to-page/
 | 局限               | 说明                                                                                        |
 | ------------------ | ------------------------------------------------------------------------------------------- |
 | 搜索是字面匹配     | 理解不了同义词（如「营业额」与 `revenue`），需要文档写好中文说明                            |
-| 只支持一份文档     | 多个微服务文档需先合并                                                                      |
+| 一次调用一份文档   | 页面同时用到多个微服务的接口时，分别对每份文档调用；或者先合并成一份                        |
 | 精简会丢信息       | 对象类型的可空性不表示；没写 `required` 时不标可选；`allOf` 成员里的 `oneOf`/`anyOf` 不合并 |
-| 外部 `$ref` 不解析 | 需先 bundle 成单文件                                                                        |
+| 外部 `$ref` 不解析 | 需先 bundle 成单文件（结果里会有 `warning` 提示）                                           |
 | Figma 配额         | 需付费计划 Dev/Full 席位；View/Collab 席位即使在企业计划也按月计次                          |
 | 规则不能强制执行   | Skill 只是说明文字，硬性规则需做成 ESLint 规则                                              |
 | 跨客户端           | 仅确认 Claude Code 支持项目内 `.claude/skills/`，其他客户端未验证                           |
@@ -252,14 +279,14 @@ skills/figma-to-page/
 
 ## 7. 测试与验证
 
-| 内容                                     | 方式                                           | 结果                                         |
-| ---------------------------------------- | ---------------------------------------------- | -------------------------------------------- |
-| 工具注册、提示词、关键词检索             | `api-context.test.ts`（通过 MCP 内存传输调用） | 通过                                         |
-| 结构提升、循环引用、allOf 合并、notFound | 同上                                           | 通过                                         |
-| Swagger 2 与 OpenAPI 3 输出一致          | 同上                                           | 通过                                         |
-| 构建产物 stdio 端到端                    | 启动 `dist/bin.js`，列工具、取提示词、调用工具 | 通过                                         |
-| mock 6 种场景                            | 生成 handler，用真实 MSW（`setupServer`）请求  | 通过（手动运行，仓库里没有对应的自动化测试） |
-| 像素对比                                 | 构造图片：差异像素数、宽度不一致、缺依赖       | 通过（手动运行，同上）                       |
-| Skill 端到端                             | 需在真实前端项目中运行                         | **未进行**                                   |
-
-已知与本功能无关的问题：`src/tests/server.test.ts` 在 Windows 上因 `spawn tsx ENOENT` 失败，在改动前的代码上同样失败。
+| 内容                                                                 | 方式                                           | 结果                                         |
+| -------------------------------------------------------------------- | ---------------------------------------------- | -------------------------------------------- |
+| 工具注册、提示词、关键词检索                                         | `api-context.test.ts`（通过 MCP 内存传输调用） | 通过                                         |
+| `spec` 参数：默认文档、缺失时的提示、HTTP 模式的限制、请求头只发同源 | 同上                                           | 通过                                         |
+| 错误文件的提示：相对路径、目录、HTML、Postman、多文件                | 同上                                           | 通过                                         |
+| 结构提升、循环引用、allOf 合并、notFound                             | 同上                                           | 通过                                         |
+| Swagger 2 与 OpenAPI 3 输出一致                                      | 同上                                           | 通过                                         |
+| 构建产物 stdio 端到端                                                | 启动 `dist/bin.js`，列工具、取提示词、调用工具 | 通过                                         |
+| mock 6 种场景                                                        | 生成 handler，用真实 MSW（`setupServer`）请求  | 通过（手动运行，仓库里没有对应的自动化测试） |
+| 像素对比                                                             | 构造图片：差异像素数、宽度不一致、缺依赖       | 通过（手动运行，同上）                       |
+| Skill 端到端                                                         | 需在真实前端项目中运行                         | **未进行**                                   |

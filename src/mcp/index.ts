@@ -4,6 +4,7 @@ import { Logger } from "../utils/logger.js";
 import { authMode, type AuthMode, type ClientInfo, type Transport } from "~/telemetry/index.js";
 import type { OutputFormat } from "~/utils/serialize.js";
 import type { OpenApiSource } from "~/services/openapi/load.js";
+import type { SpecPolicy } from "~/services/openapi/source.js";
 import { installValidationRejectCapture } from "./validation-capture.js";
 import type { ToolExtra } from "./progress.js";
 import {
@@ -30,8 +31,13 @@ export type CreateServerOptions = {
   outputFormat?: OutputFormat;
   skipImageDownloads?: boolean;
   imageDir?: string;
-  /** OpenAPI spec to expose via get_api_context. The tool is only registered when set. */
+  /** Default OpenAPI spec for get_api_context (calls may name their own; see `openapiAllowDynamic`). */
   openapi?: OpenApiSource;
+  /**
+   * Let HTTP-mode calls name their own spec. stdio always allows it — see
+   * `SpecPolicy.allowPerCall` for why the transports differ.
+   */
+  openapiAllowDynamic?: boolean;
 };
 
 function createServer(
@@ -42,6 +48,7 @@ function createServer(
     skipImageDownloads = false,
     imageDir,
     openapi,
+    openapiAllowDynamic = false,
   }: CreateServerOptions,
 ) {
   const server = new McpServer(serverInfo);
@@ -60,7 +67,10 @@ function createServer(
     outputFormat,
     skipImageDownloads,
     imageDir,
-    openapi,
+    specPolicy: {
+      configured: openapi,
+      allowPerCall: transport === "stdio" || openapiAllowDynamic,
+    },
     getClientInfo,
   });
 
@@ -82,7 +92,7 @@ type RegisterToolsOptions = {
   outputFormat: OutputFormat;
   skipImageDownloads: boolean;
   imageDir?: string;
-  openapi?: OpenApiSource;
+  specPolicy: SpecPolicy;
   getClientInfo: () => ClientInfo | undefined;
 };
 
@@ -133,18 +143,20 @@ function registerTools(
     );
   }
 
-  const { openapi } = options;
-  if (openapi) {
+  const { specPolicy } = options;
+  // Without a default spec or per-call specs, every call would fail; don't
+  // advertise a tool that can't work.
+  if (specPolicy.configured || specPolicy.allowPerCall) {
     server.registerTool(
       getApiContextTool.name,
       {
         title: "Get API Context",
-        description: getApiContextTool.description,
+        description: getApiContextTool.getDescription(specPolicy),
         inputSchema: getApiContextTool.parametersSchema,
         annotations: { readOnlyHint: true },
       },
       (params: GetApiContextParams) =>
-        getApiContextTool.handler(params, openapi, options.outputFormat),
+        getApiContextTool.handler(params, specPolicy, options.outputFormat),
     );
 
     server.registerPrompt(

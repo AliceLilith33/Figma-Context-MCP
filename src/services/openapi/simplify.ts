@@ -52,6 +52,8 @@ export type SimplifiedApi = {
   operationRefs: Map<string, Set<string>>;
   /** Schema names each hoisted schema references directly. */
   schemaRefs: Map<string, Set<string>>;
+  /** Distinct `$ref`s pointing into other files — each renders as `unresolved(...)`. */
+  externalRefs: string[];
 };
 
 type JsonObject = Record<string, unknown>;
@@ -104,7 +106,7 @@ export function simplifyOpenApi(doc: OpenApiDocument): SimplifiedApi {
   // load.ts already validated the version; anything not OAS3 is Swagger 2.
   const isSwagger2 = doc.openapi === undefined;
   const schemaPrefix = isSwagger2 ? "#/definitions/" : "#/components/schemas/";
-  const refCounts = countSchemaRefs(doc, schemaPrefix);
+  const { refCounts, externalRefs } = scanRefs(doc, schemaPrefix);
 
   const ctx: Ctx = {
     doc,
@@ -176,6 +178,7 @@ export function simplifyOpenApi(doc: OpenApiDocument): SimplifiedApi {
     schemas,
     operationRefs,
     schemaRefs,
+    externalRefs,
   };
 }
 
@@ -579,8 +582,15 @@ function formatLiteral(value: unknown): string {
 
 // -------------------- REFS & POINTERS --------------------
 
-function countSchemaRefs(doc: OpenApiDocument, prefix: string): Map<string, number> {
+function scanRefs(
+  doc: OpenApiDocument,
+  prefix: string,
+): { refCounts: Map<string, number>; externalRefs: string[] } {
   const counts = new Map<string, number>();
+  // Split specs (`$ref: ./schemas/Order.yaml`) are deliberately not followed:
+  // resolving them means reading arbitrary sibling files or URLs named by the
+  // document. They're reported so the caller can ask for a bundled export.
+  const external = new Set<string>();
   const seen = new Set<object>();
   const walk = (value: unknown) => {
     // YAML anchors can make the parsed tree a DAG; visit each object once.
@@ -591,11 +601,13 @@ function countSchemaRefs(doc: OpenApiDocument, prefix: string): Map<string, numb
     if (typeof ref === "string" && ref.startsWith(prefix)) {
       const name = unescapePointer(ref.slice(prefix.length));
       if (!name.includes("/")) counts.set(name, (counts.get(name) ?? 0) + 1);
+    } else if (typeof ref === "string" && !ref.startsWith("#")) {
+      external.add(ref);
     }
     Object.values(value).forEach(walk);
   };
   walk(doc);
-  return counts;
+  return { refCounts: counts, externalRefs: [...external] };
 }
 
 /** Name of a top-level schema ref (`#/components/schemas/Order` → `Order`), else undefined. */
