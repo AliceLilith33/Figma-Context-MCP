@@ -166,7 +166,7 @@ function registerTools(
         description: implementDesignWithApiPrompt.description,
         argsSchema: implementDesignWithApiPrompt.argsSchema,
       },
-      implementDesignWithApiPrompt.build,
+      (args) => implementDesignWithApiPrompt.build(args, specPolicy),
     );
   }
 }

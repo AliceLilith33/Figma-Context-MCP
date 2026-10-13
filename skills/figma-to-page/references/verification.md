@@ -42,7 +42,7 @@
    ```bash
    node <skill>/scripts/gen-mock-handlers.mjs --spec <OpenAPI 文件或 URL> --out src/mocks/handlers.ts --ops listOrders,getOrderDetail,getCurrentUser --base api
    ```
-   - `--spec`：和 `get_api_context` 用的是同一份文档（SKILL 第 2 步确定的位置）。用的是服务配置的默认文档时，地址写在 `get_api_context` 的工具说明里（`configured spec (<位置>)`）。不要为了找地址去读 MCP 配置文件，里面有 Figma 令牌。
+   - `--spec`：和 `get_api_context` 用的是同一份文档（SKILL 第 2 步确定的位置）。用的是服务配置的默认文档时，地址写在 `get_api_context` 的工具说明里（`configured spec (<位置>)`，URL 去掉了查询参数）。需要认证的地址拉不下来时，请用户提供请求头（脚本的 `--header`）或导出的文件。不要为了找地址去读 MCP 配置文件，里面有 Figma 令牌。
    - `--ops`：本页面用到的接口，**加上页面外层布局会请求的公共接口**（用户信息、菜单、权限等）。否则这些请求会打到可能没启动的后端，跳登录页或弹全局错误提示，看起来像是本页面的错误状态。写错的 operationId 会让脚本直接报错（区分大小写）。
    - `--base`：前端实际请求的路径前缀。例如前端请求 `/api/orders`，代理再转发给后端，就填 `api`（不写开头的斜杠，脚本会补；写成 `/api` 在 Git Bash 里会被改写成 Windows 路径）。不传时取文档里 servers 的路径。
    - `--out`：TS 项目用 `.ts`（文件头会加 `// @ts-nocheck`），JS 项目用 `.js`。

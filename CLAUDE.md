@@ -114,6 +114,7 @@ From CONTRIBUTING.md — important context for development:
 1. **Unix Philosophy** — Tools should have one job and few arguments. Keep tools simple to avoid confusing LLMs.
 2. **Focused Scope** — The server only handles "ingesting designs for AI consumption." Out of scope: image manipulation, CMS syncing, code generation, third-party integrations.
 3. **Project-level Config** — Options unlikely to change between requests should be CLI arguments, not tool parameters.
+   - Deliberate exception in this fork: `get_api_context` takes `spec` per call, because the spec is project-specific and usually handed over in conversation as an exported file. `--openapi` remains the default; HTTP mode needs `--openapi-allow-dynamic`.
 
 ## Token Efficiency
 

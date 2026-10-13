@@ -1,7 +1,7 @@
 import { config as loadEnv } from "dotenv";
 import { resolve as resolvePath } from "path";
 import type { FigmaAuthOptions } from "./services/figma.js";
-import { isUrl, type OpenApiSource } from "./services/openapi/load.js";
+import { isUrl, redactUrl, type OpenApiSource } from "./services/openapi/load.js";
 import { resolveTelemetryEnabled } from "./telemetry/index.js";
 import { VALID_OUTPUT_FORMATS, isOutputFormat, type OutputFormat } from "./utils/serialize.js";
 
@@ -266,7 +266,7 @@ export function getServerConfig(flags: ServerFlags): ServerConfig {
     );
     console.log(`- IMAGE_DIR: ${imageDir.value} (source: ${configSources.imageDir})`);
     console.log(
-      `- OPENAPI_SPEC: ${openapi.value?.location ?? "none"}${openapi.value?.headers ? " (with auth header)" : ""} (source: ${configSources.openapi})`,
+      `- OPENAPI_SPEC: ${openapi.value ? redactUrl(openapi.value.location) : "none"}${openapi.value?.headers ? " (with auth header)" : ""} (source: ${configSources.openapi})`,
     );
     console.log(
       `- OPENAPI_ALLOW_DYNAMIC: ${openapiAllowDynamic.value} (source: ${configSources.openapiAllowDynamic})`,

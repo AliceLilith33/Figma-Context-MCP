@@ -31,7 +31,7 @@
 | figma-to-page Skill（`skills/figma-to-page/`） | 完整流程：项目约定、静态还原、视觉对比、找接口、绑定数据、mock/live 验收                                         | 推荐；Agent 不支持 Skill 时见 [7.4](#74-不支持-skill-的-agent) |
 | chrome-devtools MCP                            | 截图对比、验收时检查页面、网络请求和控制台                                                                       | 可选；没有就跳过浏览器检查                                     |
 
-接口文档不需要在安装时配置：AI 调用 `get_api_context` 时再指定（用户提供，或从项目里找），见 [4.2](#42-接口文档调用时指定或配置默认值)。只想让 AI 读设计稿时，不用管这个工具。
+接口文档不需要在安装时配置（stdio 模式；HTTP 模式见 4.2 末尾）：AI 调用 `get_api_context` 时再指定（用户提供，或从项目里找），见 [4.2](#42-接口文档调用时指定或配置默认值)。只想让 AI 读设计稿时，不用管这个工具。
 
 ## 2. 前置条件
 
@@ -166,14 +166,14 @@ node dist/bin.js api --openapi ./openapi.yaml --keywords "订单列表,实付金
 
 注意：
 
-- **路径写绝对路径**。相对路径会被拒绝，因为它会按服务进程的当前目录解析，而不是项目目录。
+- **路径写绝对路径**，Windows 要带盘符（`E:/work/...`；Git Bash 的 `/e/work/...` 也可以）。相对路径会被拒绝，因为它会按服务进程的当前目录解析，而不是项目目录。
 - **文件放在哪里都可以**。放进前端项目（如 `docs/api/swagger.json`）并提交，团队里每个人都能用；文档里可能有内部信息时，不要提交。
 - **后端改了接口要重新导出**。覆盖原来的文件即可，下一次调用就会用新内容，不用重启 Agent。
 - **多文件文档要先合并**。主文件里有 `$ref: ./schemas/Order.yaml` 这类引用时，工具结果里会有 `warning`，被引用的部分显示为 `unresolved(...)`。合并命令：`npx @redocly/cli bundle openapi.yaml -o openapi.bundled.yaml`。
 - **有多个分组或多个服务**：每个分组是一份单独的文档。一次调用只读一份，页面用到哪个分组的接口，就给哪一份。
 - **给错文件时工具会说明原因**：Swagger UI 等 HTML 页面、Postman 集合、目录（会列出目录里的 JSON/YAML 文件）、相对路径。
 
-**HTTP 模式**：服务可能被多人共用，默认**不接受** `spec` 参数，只用 `--openapi`。确认只有自己能访问这个服务时，可以加 `--openapi-allow-dynamic` 放开。
+**HTTP 模式**：服务可能被多人共用，默认**不接受** `spec` 参数，只用 `--openapi`。确认只有自己能访问这个服务时，可以加 `--openapi-allow-dynamic` 放开。注意这时文件路径指的是**运行服务的机器**上的路径。
 
 ## 5. 运行方式：stdio 与 HTTP
 
@@ -318,7 +318,7 @@ env_vars = ["FIGMA_API_KEY"]   # 从当前环境转发，令牌不写进文件
 ```
 
 - TOML 字符串里的 Windows 路径用 `/`，或者用单引号字面量 `'E:\work\shop-web'`。
-- `startup_timeout_sec` 默认 10 秒；第一次拉取远程接口文档较慢时调大一些。
+- `startup_timeout_sec` 默认 10 秒，一般够用；机器较慢、启动超时时调大一些。
 
 **检查**：`codex mcp list`；会话中输入 `/mcp`。
 
@@ -482,24 +482,24 @@ npx pnpm@10.10.0 build
 
 ## 11. 常见问题
 
-| 问题                                                                         | 原因                                                                                             | 解决办法                                                                         |
-| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
-| 看不到 `get_api_context`                                                     | 启动的是 npm 上的官方版本；或者是 HTTP 模式，既没配 `--openapi` 也没加 `--openapi-allow-dynamic` | 检查命令是 `node <BIN>`；HTTP 模式按 4.2 处理                                    |
-| AI 说没有接口文档、问文档在哪                                                | 调用时没给 `spec`，也没有默认文档                                                                | 告诉它文档的绝对路径或 URL；用 Skill 时它会记进项目约定                          |
-| 报 `is an HTML/XML page`                                                     | 给的是 Swagger UI 等网页，不是文档本身                                                           | 按 4.2 的表格导出文档文件，或者给文档的 URL                                      |
-| 结果里有 `warning`，提到 `split across files`                                | 文档拆成了多个文件                                                                               | 用 `npx @redocly/cli bundle` 合并成一个文件                                      |
-| 报 `does not accept` 或 `only serves its configured`                         | HTTP 模式默认不接受调用时指定文档                                                                | 用 `--openapi` 配置，或加 `--openapi-allow-dynamic`                              |
-| 服务连不上，日志里有 `Either FIGMA_API_KEY or FIGMA_OAUTH_TOKEN is required` | stdio 模式启动时没拿到令牌                                                                       | 用 `--figma-api-key` 传入；检查 `env` 写法是否被该 Agent 支持                    |
-| 服务连不上，没有任何日志                                                     | 漏了 `--stdio`；或 `node` 不在 Agent 的 PATH 里                                                  | 加 `--stdio`；`command` 改成 node 的绝对路径（`where node` / `which node` 查看） |
-| 配置的 `env` 不生效                                                          | 服务当前目录下的 `.env` 覆盖了它                                                                 | 改用命令行参数，或用 `--env` 指向专用的 `.env` 文件                              |
-| `get_api_context` 报 `ENOENT` 或 `relative path`                             | 文档路径写了相对路径                                                                             | 改成绝对路径                                                                     |
-| 图片下载到了奇怪的目录                                                       | 没配 `--image-dir`，默认是服务进程的当前目录                                                     | 配置 `--image-dir=<PROJECT>`；工具返回的消息里有实际保存的绝对路径               |
-| 改了代码或重新构建后没变化                                                   | Agent 还在用旧进程                                                                               | 重启 Agent 或在 MCP 面板重启服务                                                 |
-| Codex 启动服务超时                                                           | 默认 10 秒，第一次拉取远程文档较慢                                                               | `startup_timeout_sec = 30`                                                       |
-| Codex 不认 Skill                                                             | 放在了 `.claude/skills/`                                                                         | 放到 `.agents/skills/`                                                           |
-| Cursor、VS Code 里出现两个 figma-to-page                                     | `.agents/skills/` 和 `.claude/skills/` 各有一份                                                  | 只保留一份，另一处用链接                                                         |
-| 公司网络连不上 Figma 或接口文档                                              | 需要代理                                                                                         | `--proxy=http://代理:端口`，或设置 `HTTPS_PROXY`                                 |
-| 不想发送使用统计                                                             | 默认开启                                                                                         | 加 `--no-telemetry`，或设置 `FRAMELINK_TELEMETRY=off`                            |
+| 问题                                                                              | 原因                                                                                             | 解决办法                                                                         |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| 看不到 `get_api_context`                                                          | 启动的是 npm 上的官方版本；或者是 HTTP 模式，既没配 `--openapi` 也没加 `--openapi-allow-dynamic` | 检查命令是 `node <BIN>`；HTTP 模式按 4.2 处理                                    |
+| AI 说没有接口文档、问文档在哪                                                     | 调用时没给 `spec`，也没有默认文档                                                                | 告诉它文档的绝对路径或 URL；用 Skill 时它会记进项目约定                          |
+| 报 `is an HTML/XML page`                                                          | 给的是 Swagger UI 等网页，不是文档本身                                                           | 按 4.2 的表格导出文档文件，或者给文档的 URL                                      |
+| 结果里有 `warning`，提到 `split across files`                                     | 文档拆成了多个文件                                                                               | 用 `npx @redocly/cli bundle` 合并成一个文件                                      |
+| 报 `only serves its configured`                                                   | HTTP 模式下服务只用 `--openapi` 配置的文档                                                       | 调用时不带 `spec`；要用别的文档就加 `--openapi-allow-dynamic`                    |
+| 服务连不上，日志里有 `Either FIGMA_API_KEY or FIGMA_OAUTH_TOKEN is required`      | stdio 模式启动时没拿到令牌                                                                       | 用 `--figma-api-key` 传入；检查 `env` 写法是否被该 Agent 支持                    |
+| 服务连不上，没有任何日志                                                          | 漏了 `--stdio`；或 `node` 不在 Agent 的 PATH 里                                                  | 加 `--stdio`；`command` 改成 node 的绝对路径（`where node` / `which node` 查看） |
+| 配置的 `env` 不生效                                                               | 服务当前目录下的 `.env` 覆盖了它                                                                 | 改用命令行参数，或用 `--env` 指向专用的 `.env` 文件                              |
+| `get_api_context` 报 `not an absolute path`、`file not found` 或 `is a directory` | 路径是相对路径或没有盘符、文件不存在，或者给的是目录                                             | 给文件的完整路径（带盘符）；目录的报错里会列出其中的 JSON/YAML 文件              |
+| 图片下载到了奇怪的目录                                                            | 没配 `--image-dir`，默认是服务进程的当前目录                                                     | 配置 `--image-dir=<PROJECT>`；工具返回的消息里有实际保存的绝对路径               |
+| 改了代码或重新构建后没变化                                                        | Agent 还在用旧进程                                                                               | 重启 Agent 或在 MCP 面板重启服务                                                 |
+| Codex 启动服务超时                                                                | 默认 10 秒，机器较慢时不够                                                                       | `startup_timeout_sec = 30`                                                       |
+| Codex 不认 Skill                                                                  | 放在了 `.claude/skills/`                                                                         | 放到 `.agents/skills/`                                                           |
+| Cursor、VS Code 里出现两个 figma-to-page                                          | `.agents/skills/` 和 `.claude/skills/` 各有一份                                                  | 只保留一份，另一处用链接                                                         |
+| 公司网络连不上 Figma 或接口文档                                                   | 需要代理                                                                                         | `--proxy=http://代理:端口`，或设置 `HTTPS_PROXY`                                 |
+| 不想发送使用统计                                                                  | 默认开启                                                                                         | 加 `--no-telemetry`，或设置 `FRAMELINK_TELEMETRY=off`                            |
 
 更多和使用流程有关的问题，见 [figma-to-page-guide.md](figma-to-page-guide.md) 第 7 节。
 

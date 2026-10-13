@@ -25,7 +25,8 @@ const FETCH_TIMEOUT_MS = 30_000;
 // most recently used ones rather than every spec ever loaded.
 const MAX_CACHED_SPECS = 10;
 
-type CacheEntry = { version: number; doc: OpenApiDocument };
+/** `version` is the fetch time for URLs, the mtime for files (plus `size`). */
+type CacheEntry = { version: number; size?: number; doc: OpenApiDocument };
 const cache = new Map<string, CacheEntry>();
 
 function remember(location: string, entry: CacheEntry): void {
@@ -63,7 +64,7 @@ export async function loadOpenApiDocument(source: OpenApiSource): Promise<OpenAp
       // A dev backend restarting shouldn't break a session that already has
       // a good copy; keep serving it and retry after the next TTL window.
       if (!cached) throw error;
-      cached.version = Date.now();
+      remember(location, { ...cached, version: Date.now() });
       return cached.doc;
     }
     remember(location, { version: Date.now(), doc });
@@ -71,32 +72,54 @@ export async function loadOpenApiDocument(source: OpenApiSource): Promise<OpenAp
   }
 
   // mtime, not a TTL: re-exporting the spec over the same file is picked up on
-  // the very next call.
-  const { mtimeMs } = await stat(location);
-  if (cached && cached.version === mtimeMs) {
+  // the very next call. Size too: coarse timestamps (FAT/SMB) and copies that
+  // keep the original mtime can leave mtime unchanged across a re-export.
+  const { mtimeMs, size } = await stat(location);
+  if (cached && cached.version === mtimeMs && cached.size === size) {
     remember(location, cached);
     return cached.doc;
   }
   const doc = parseDocument(await readFile(location, "utf8"), location);
-  remember(location, { version: mtimeMs, doc });
+  remember(location, { version: mtimeMs, size, doc });
   return doc;
 }
 
-/** Error messages reach the LLM and logs; a `?token=` in the spec URL must not. */
+/**
+ * Error messages, logs and the tool description reach the LLM; a `?token=` or
+ * `user:password@` in the spec URL must not.
+ */
 export function redactUrl(url: string): string {
-  return url.replace(/[?#].*$/, "");
+  // File paths pass through: `#` is a legal file-name character.
+  if (!isUrl(url)) return url;
+  return url.replace(/[?#].*$/, "").replace(/^(https?:\/\/)[^/@]*@/i, "$1");
 }
 
 async function fetchText(url: string, headers: Record<string, string> = {}): Promise<string> {
+  // With an auth header attached, a redirect could carry it to another host:
+  // undici strips only Authorization/Cookie cross-origin, not custom headers.
+  const sendsAuth = Object.keys(headers).length > 0;
   let response: Response;
   try {
-    response = await fetch(url, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    response = await fetch(url, {
+      headers,
+      redirect: sendsAuth ? "manual" : "follow",
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
   } catch (error) {
     // undici's bare "fetch failed" hides the useful part in `cause` (ECONNREFUSED etc.).
     const cause = error instanceof Error ? (error.cause ?? error) : error;
-    const reason = cause instanceof Error ? cause.message : String(cause);
+    const reason = (cause instanceof Error ? cause.message : String(cause))
+      .split(url)
+      .join(redactUrl(url));
     const wrapped = new Error(`Failed to fetch OpenAPI document from ${redactUrl(url)}: ${reason}`);
     tagError(wrapped, { category: "network" });
+  }
+  if (sendsAuth && response.status >= 300 && response.status < 400) {
+    const error = new Error(
+      `Failed to fetch OpenAPI document from ${redactUrl(url)}: ${response.status} redirect. ` +
+        "Redirects are not followed while sending the configured auth header; use the URL it redirects to.",
+    );
+    tagError(error, { http_status: response.status, category: "network" });
   }
   if (!response.ok) {
     // Deliberately no response body in the message: internal doc servers can

@@ -66,7 +66,15 @@ describe("get_api_context", () => {
       keywords: ["我的订单", "实付金额"],
     });
     expect((yaml.load(given.text) as ApiContext).operations[0].id).toBe("listOrders");
+    // Explorer's "Copy as path" quotes the path.
+    expect((await callTool(stdio, { spec: `"${oas3.location}"` })).isError).toBe(false);
     await stdio.close();
+
+    // A per-call spec wins over the default (the Swagger 2 fixture uses an API-key scheme).
+    const withDefault = await connect({ openapi: oas3 });
+    const overridden = await callTool(withDefault, { spec: swagger2.location });
+    expect((yaml.load(overridden.text) as { api: { auth: string } }).api.auth).toMatch(/API key/);
+    await withDefault.close();
 
     // HTTP: a shared server only serves its configured spec unless explicitly opened up.
     const bare = await connect({ transport: "http" });
@@ -82,6 +90,10 @@ describe("get_api_context", () => {
     expect((await callTool(http, { spec: echoed, keywords: ["订单"] })).isError).toBe(false);
     expect((await callTool(http, { spec: swagger2.location })).text).toMatch(/only serves/);
     await http.close();
+
+    const dynamic = await connect({ transport: "http", openapiAllowDynamic: true });
+    expect((await callTool(dynamic, { spec: swagger2.location })).isError).toBe(false);
+    await dynamic.close();
   });
 
   it("explains the usual wrong files instead of failing with a parse error", async () => {
@@ -106,7 +118,7 @@ describe("get_api_context", () => {
     const client = await connect({});
     const error = async (spec: string) => (await callTool(client, { spec })).text;
 
-    expect(await error("specs/openapi.yaml")).toMatch(/relative path/);
+    expect(await error("specs/openapi.yaml")).toMatch(/not an absolute path/);
     expect(await error(dir)).toMatch(/directory.*openapi\.yaml/);
     expect(await error(swaggerUi)).toMatch(/HTML\/XML page/);
     expect(await error(postman)).toMatch(/Postman collection/);
@@ -135,6 +147,16 @@ describe("get_api_context", () => {
     expect(
       (await resolveSpecSource("https://elsewhere.example/openapi.json", policy)).headers,
     ).toBeUndefined();
+
+    // The description shows the default without its query; echoing that back
+    // still means the default, token included.
+    const withToken = { location: "https://docs.internal/v3/api-docs?token=abc" };
+    expect(
+      await resolveSpecSource("https://docs.internal/v3/api-docs", {
+        configured: withToken,
+        allowPerCall: false,
+      }),
+    ).toBe(withToken);
   });
 
   it("ranks operations from design wording that only partly matches the spec", async () => {

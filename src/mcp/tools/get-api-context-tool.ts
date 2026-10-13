@@ -49,7 +49,7 @@ async function getApiContext(
   try {
     const { spec, ...input } = parametersSchema.parse(params);
     const source = await resolveSpecSource(spec, policy);
-    Logger.log(`Fetching API context from ${source.location}`);
+    Logger.log(`Fetching API context from ${redactUrl(source.location)}`);
     const formatted = await runGetApiContext(source, input, outputFormat);
     return { content: [{ type: "text" as const, text: formatted }] };
   } catch (error) {

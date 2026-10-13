@@ -1,7 +1,7 @@
 import { readdir, stat } from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
-import { isUrl, type OpenApiSource } from "./load.js";
+import { isUrl, redactUrl, type OpenApiSource } from "./load.js";
 
 /**
  * Where a `get_api_context` call may read its spec from.
@@ -44,42 +44,67 @@ export async function resolveSpecSource(
   spec: string | undefined,
   policy: SpecPolicy,
 ): Promise<OpenApiSource> {
-  const requested = spec?.trim();
+  // "Copy as path" in Windows Explorer wraps the path in quotes.
+  const requested = spec?.trim().replace(/^(["'])(.*)\1$/, "$2");
   const { configured } = policy;
 
   if (!requested) {
     if (configured) return configured;
     throw new SpecSourceError(MISSING_SPEC_MESSAGE);
   }
+  const filePath = isUrl(requested) ? undefined : toAbsolutePath(requested);
   // Agents often echo the default back (the tool description names it); that's
-  // not a per-call spec, even if spelled with different slashes.
-  if (configured && sameLocation(requested, configured.location)) return configured;
+  // not a per-call spec.
+  if (configured && isConfigured(requested, filePath, configured.location)) return configured;
   if (!policy.allowPerCall) {
+    // No default and no per-call specs means the tool isn't registered at all.
     throw new SpecSourceError(
-      configured
-        ? "This server only serves its configured OpenAPI spec. Call get_api_context without `spec`."
-        : "This server has no OpenAPI spec configured and does not accept `spec` per call (HTTP mode). " +
-          "Restart it with --openapi=<spec>, or with --openapi-allow-dynamic to accept `spec`.",
+      `This server only serves its configured OpenAPI spec (${redactUrl(configured?.location ?? "")}). Call get_api_context without \`spec\`.`,
     );
   }
 
   if (isUrl(requested)) return { location: requested, headers: headersFor(requested, configured) };
 
-  const filePath = /^file:/i.test(requested) ? fileURLToPath(requested) : requested;
-  if (!path.isAbsolute(filePath)) {
+  if (!filePath) {
     throw new SpecSourceError(
-      `"${requested}" is a relative path. Pass an absolute path: relative paths would resolve against the MCP server's working directory, not the project.`,
+      `"${requested}" is not an absolute path (on Windows, include the drive letter, e.g. E:/work/app/swagger.json). ` +
+        "Relative paths would resolve against the MCP server's working directory, not the project.",
     );
   }
   await assertSpecFile(filePath);
-  // Same form config.ts gives the default, so one file is one cache entry.
-  return { location: path.resolve(filePath) };
+  return { location: filePath };
 }
 
-/** Configured file locations are already absolute and resolved (config.ts). */
-function sameLocation(requested: string, configured: string): boolean {
-  if (isUrl(requested) || isUrl(configured)) return requested === configured;
-  return path.isAbsolute(requested) && path.resolve(requested) === configured;
+/** Absolute, resolved form (as config.ts gives the default), or undefined if relative. */
+function toAbsolutePath(input: string): string | undefined {
+  let filePath = /^file:/i.test(input) ? fileURLToPath(input) : input;
+  if (process.platform === "win32") {
+    // Git Bash spells E:\work as /e/work, and it's the shell Claude Code uses
+    // on Windows; Node would read it as E:\e\work on the current drive.
+    filePath = filePath.replace(
+      /^\/([a-z])(?=\/|$)/i,
+      (_, drive: string) => `${drive.toUpperCase()}:`,
+    );
+    // `\work\x.json` counts as absolute to Node but depends on the server's
+    // current drive — the same trap as a relative path.
+    if (!/^([a-z]:[\\/]|[\\/]{2})/i.test(filePath)) return undefined;
+  } else if (!path.isAbsolute(filePath)) {
+    return undefined;
+  }
+  return path.resolve(filePath);
+}
+
+function isConfigured(
+  requested: string,
+  filePath: string | undefined,
+  configured: string,
+): boolean {
+  // The description shows the default redacted, so that form counts as the default too.
+  if (isUrl(configured)) return requested === configured || requested === redactUrl(configured);
+  if (!filePath) return false;
+  return process.platform === "win32"
+    ? filePath.toLowerCase() === configured.toLowerCase()
+    : filePath === configured;
 }
 
 /**
