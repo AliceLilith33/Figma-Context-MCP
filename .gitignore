@@ -43,7 +43,11 @@ Thumbs.db
 
 # Private planning / brainstorm / ideas workspace — version-controlled in a
 # separate private repo (FramelinkAI/mcp-docs) cloned to this path.
-/docs/
+# The listed files are this fork's public docs and stay tracked.
+/docs/*
+!/docs/backend-api-integration.md
+!/docs/figma-to-page-guide.md
+!/docs/setup-guide.md
 
 # Local experiment scratchpad
 /trials/
@@ -52,3 +56,5 @@ Thumbs.db
 advisor-plans/
 .tk
 scripts/
+# Skill scripts ship with the skill.
+!/skills/*/scripts/

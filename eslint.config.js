@@ -42,7 +42,7 @@ export default [
     },
   },
   {
-    files: ["scripts/**/*.mjs"],
+    files: ["scripts/**/*.mjs", "skills/**/scripts/*.mjs"],
     languageOptions: {
       globals: {
         ...globals.node,

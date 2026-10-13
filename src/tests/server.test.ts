@@ -185,9 +185,14 @@ describe("Process-level HTTP startup", () => {
   /** Spawn bin.ts and resolve once the server logs that it's listening. */
   function spawnAndWaitForReady(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      child = spawn("tsx", ["src/bin.ts", `--figma-api-key=test-key`, `--port=${TEST_PORT}`], {
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+      // `node --import tsx` rather than spawning `tsx`: on Windows the bin is a
+      // `tsx.cmd` shim that spawn() can't run without a shell (ENOENT), and
+      // killing a shell wrapper would leave the server process orphaned.
+      child = spawn(
+        process.execPath,
+        ["--import", "tsx", "src/bin.ts", `--figma-api-key=test-key`, `--port=${TEST_PORT}`],
+        { stdio: ["pipe", "pipe", "pipe"] },
+      );
 
       const timeout = setTimeout(() => {
         reject(new Error("Server did not become ready within 15 seconds"));

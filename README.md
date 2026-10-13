@@ -86,6 +86,58 @@ Or you can set `FIGMA_API_KEY` and `PORT` in the `env` field.
 
 If you need more information on how to configure the Framelink MCP for Figma, see the [Framelink docs](https://www.framelink.ai/docs/quickstart?utm_source=github&utm_medium=referral&utm_campaign=readme).
 
+## Wiring designs to your backend API
+
+Point the server at your backend's OpenAPI spec and the AI can build pages that fetch and display real data instead of hard-coding the design's placeholder content. See [docs/setup-guide.md](docs/setup-guide.md) for installing and configuring it in Claude Code, Cursor, VS Code, Codex CLI, Gemini CLI and other agents, [docs/backend-api-integration.md](docs/backend-api-integration.md) for how it works, and [docs/figma-to-page-guide.md](docs/figma-to-page-guide.md) for a walkthrough and troubleshooting.
+
+> These features exist only in this repository's local build — `npx figma-developer-mcp` installs the upstream npm package, which ignores `--openapi`. Build it (`pnpm install && pnpm build`) and run `dist/bin.js` directly.
+
+Enable it with `--openapi` (use an absolute path: relative paths resolve against the directory your MCP client launches the server from):
+
+```json
+"command": "node",
+"args": ["/path/to/Figma-Context-MCP/dist/bin.js", "--figma-api-key=YOUR-KEY", "--openapi=/path/to/openapi.yaml", "--stdio"]
+```
+
+| Option             | Env var               | Description                                                                                 |
+| ------------------ | --------------------- | ------------------------------------------------------------------------------------------- |
+| `--openapi`        | `OPENAPI_SPEC`        | OpenAPI 3.x / Swagger 2.0 spec, file path or URL (e.g. `http://localhost:8080/v3/api-docs`) |
+| `--openapi-header` | `OPENAPI_SPEC_HEADER` | Header for fetching a protected spec URL, e.g. `Authorization: Bearer xxx`                  |
+
+This adds:
+
+- **`get_api_context` tool** — a simplified, TypeScript-like view of the spec. Called with words from the design (`keywords`), it returns a ranked index of candidate operations; called with `operationIds`, it returns their params, request body and response shapes. Read-only: the server never calls your backend.
+- **`implement_design_with_api` prompt** — a guided workflow: fetch the design → find matching operations → implement with loading/empty/error states → finish with a UI element ↔ API field table citing the evidence for each match (matched keyword, field name or example), with write operations listed separately for confirmation.
+
+The design-to-API matching is inferred by the AI, so results depend on how much meaning the spec and design carry:
+
+**Spec requirements**
+
+1. A single file (JSON or YAML). `$ref`s must be internal (`#/components/schemas/...`); bundle multi-file specs first (e.g. `redocly bundle`).
+2. Every operation has a `summary` (business wording, in the same language as the design), an `operationId` and `tags`.
+3. 2xx responses declare a concrete schema, not just `type: object`. Add `description`, `enum`, `format` and `example` to fields — examples are a strong signal for matching design placeholder text.
+4. Pagination and response wrappers (e.g. `{ code, data, msg }`) are described as they really are.
+
+**Design requirements**
+
+1. Semantic layer names (`OrderCard`, not `Group 5`).
+2. Realistic placeholder text (`¥128.00`, `2025-01-02`, `Paid`) rather than lorem ipsum.
+3. Lists built from components or repeated structures, so they're recognisable as array data.
+
+### `figma-to-page` skill
+
+For agents that support skills (e.g. Claude Code), [`skills/figma-to-page/`](skills/figma-to-page/SKILL.md) holds the full workflow: project conventions bootstrap, static UI with visual check against a rendered Figma reference, API matching, data binding, and verification against either a mock backend (MSW, with switchable normal/empty/error/bizerror/loading/slow scenarios) or a live dev backend. The static page and the API wiring can also be done as two separate steps. Copy it into your frontend project's `.claude/skills/` and adapt it. It includes two scripts, run with the frontend project's own dependencies:
+
+- `scripts/gen-mock-handlers.mjs` — generates MSW handlers from the OpenAPI spec (the generated file imports `msw`; YAML specs also need `js-yaml`)
+- `scripts/visual-diff.mjs` — optional pixel diff of a screenshot against the Figma reference (needs `pixelmatch` + `pngjs`)
+
+To check how your spec reads after simplification, or tune keywords against it:
+
+```bash
+node dist/bin.js api --openapi ./openapi.yaml --keywords "My orders,Amount paid"
+node dist/bin.js api --openapi ./openapi.yaml --operation-ids listOrders,getOrderDetail
+```
+
 ## Star History
 
 <a href="https://star-history.com/#GLips/Figma-Context-MCP"><img src="https://api.star-history.com/svg?repos=GLips/Figma-Context-MCP&type=Date" alt="Star History Chart" width="600" /></a>

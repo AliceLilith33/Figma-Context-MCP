@@ -60,6 +60,7 @@ The server supports two transports (configured in `src/server.ts`):
 
    - `get_figma_data` — Fetches and simplifies Figma design data
    - `download_figma_images` — Downloads images from Figma
+   - `get_api_context` — Simplified OpenAPI spec context for wiring designs to backend data (only registered when `--openapi` is set; also exposes the `implement_design_with_api` prompt)
 
 2. **Figma Service** (`src/services/figma.ts`) — API client for Figma REST API
 
@@ -73,7 +74,14 @@ The server supports two transports (configured in `src/server.ts`):
    - `built-in.ts` — Built-in extractors: `layoutExtractor`, `textExtractor`, `visualsExtractor`, `componentExtractor`
    - Extractors are composable; `allExtractors` combines all built-ins
 
-4. **Transformers** (`src/transformers/`) — Convert specific Figma properties
+4. **OpenAPI** (`src/services/openapi/`) — Backing for `get_api_context`
+
+   - `load.ts` — Loads/caches the spec (file by mtime, URL by TTL)
+   - `simplify.ts` — Swagger 2 / OAS3 → compact TS-like types; count-gated schema hoisting, cycle-safe `$ref` handling
+   - `search.ts` — Lexical keyword ranking (CJK bigrams + English word stemming)
+   - `src/services/get-api-context.ts` — Shared pipeline (filter, search, format) used by both the MCP tool and the `api` CLI command (`src/commands/api.ts`, for checking how a spec reads)
+
+5. **Transformers** (`src/transformers/`) — Convert specific Figma properties
    - `layout.ts` — Layout/positioning transforms
    - `style.ts` — Visual styling (fills, strokes)
    - `effects.ts` — Effects (shadows, blurs)
@@ -90,6 +98,8 @@ The server supports two transports (configured in `src/server.ts`):
 - `OUTPUT_FORMAT` or `--format` — Output format: `tree` (default), `yaml`, or `json`
 - `--json` — Back-compat alias for `--format=json`
 - `--skip-image-downloads` — Disable image download tool
+- `OPENAPI_SPEC` or `--openapi` — OpenAPI/Swagger spec (path or URL); enables `get_api_context`
+- `OPENAPI_SPEC_HEADER` or `--openapi-header` — Header used when fetching the spec URL
 
 ### Path Alias
 

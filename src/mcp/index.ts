@@ -3,14 +3,18 @@ import { FigmaService, type FigmaAuthOptions } from "../services/figma.js";
 import { Logger } from "../utils/logger.js";
 import { authMode, type AuthMode, type ClientInfo, type Transport } from "~/telemetry/index.js";
 import type { OutputFormat } from "~/utils/serialize.js";
+import type { OpenApiSource } from "~/services/openapi/load.js";
 import { installValidationRejectCapture } from "./validation-capture.js";
 import type { ToolExtra } from "./progress.js";
 import {
   downloadFigmaImagesTool,
+  getApiContextTool,
   getFigmaDataTool,
   type DownloadImagesParams,
+  type GetApiContextParams,
   type GetFigmaDataParams,
 } from "./tools/index.js";
+import { implementDesignWithApiPrompt } from "./prompts/implement-design-with-api.js";
 
 const serverInfo = {
   name: "Figma MCP Server",
@@ -26,11 +30,19 @@ export type CreateServerOptions = {
   outputFormat?: OutputFormat;
   skipImageDownloads?: boolean;
   imageDir?: string;
+  /** OpenAPI spec to expose via get_api_context. The tool is only registered when set. */
+  openapi?: OpenApiSource;
 };
 
 function createServer(
   authOptions: FigmaAuthOptions,
-  { transport, outputFormat = "tree", skipImageDownloads = false, imageDir }: CreateServerOptions,
+  {
+    transport,
+    outputFormat = "tree",
+    skipImageDownloads = false,
+    imageDir,
+    openapi,
+  }: CreateServerOptions,
 ) {
   const server = new McpServer(serverInfo);
   const figmaService = new FigmaService(authOptions);
@@ -48,6 +60,7 @@ function createServer(
     outputFormat,
     skipImageDownloads,
     imageDir,
+    openapi,
     getClientInfo,
   });
 
@@ -69,6 +82,7 @@ type RegisterToolsOptions = {
   outputFormat: OutputFormat;
   skipImageDownloads: boolean;
   imageDir?: string;
+  openapi?: OpenApiSource;
   getClientInfo: () => ClientInfo | undefined;
 };
 
@@ -116,6 +130,31 @@ function registerTools(
           options.getClientInfo(),
           extra,
         ),
+    );
+  }
+
+  const { openapi } = options;
+  if (openapi) {
+    server.registerTool(
+      getApiContextTool.name,
+      {
+        title: "Get API Context",
+        description: getApiContextTool.description,
+        inputSchema: getApiContextTool.parametersSchema,
+        annotations: { readOnlyHint: true },
+      },
+      (params: GetApiContextParams) =>
+        getApiContextTool.handler(params, openapi, options.outputFormat),
+    );
+
+    server.registerPrompt(
+      implementDesignWithApiPrompt.name,
+      {
+        title: implementDesignWithApiPrompt.title,
+        description: implementDesignWithApiPrompt.description,
+        argsSchema: implementDesignWithApiPrompt.argsSchema,
+      },
+      implementDesignWithApiPrompt.build,
     );
   }
 }

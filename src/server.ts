@@ -69,6 +69,7 @@ export async function startServer(config: ServerConfig): Promise<void> {
     outputFormat: config.outputFormat,
     skipImageDownloads: config.skipImageDownloads,
     imageDir: config.imageDir,
+    openapi: config.openapi,
   };
 
   if (config.isStdioMode) {

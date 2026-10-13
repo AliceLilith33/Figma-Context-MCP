@@ -1,0 +1,64 @@
+{
+  "swagger": "2.0",
+  "info": { "title": "商城后台 API", "version": "1.2.0" },
+  "host": "api.example.com",
+  "basePath": "/v1",
+  "schemes": ["https"],
+  "securityDefinitions": {
+    "bearerAuth": { "type": "apiKey", "in": "header", "name": "Authorization" }
+  },
+  "security": [{ "bearerAuth": [] }],
+  "paths": {
+    "/orders": {
+      "get": {
+        "operationId": "listOrders",
+        "summary": "订单列表",
+        "tags": ["order"],
+        "parameters": [
+          { "name": "page", "in": "query", "type": "integer", "description": "页码，从 1 开始" },
+          {
+            "name": "status",
+            "in": "query",
+            "type": "string",
+            "enum": ["PENDING", "PAID", "SHIPPED", "CANCELLED"]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": { "type": "array", "items": { "$ref": "#/definitions/Order" } }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createOrder",
+        "summary": "创建订单",
+        "tags": ["order"],
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "required": ["skuId"],
+              "properties": { "skuId": { "type": "string" }, "remark": { "type": "string" } }
+            }
+          }
+        ],
+        "responses": {
+          "201": { "description": "Created", "schema": { "$ref": "#/definitions/Order" } }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "Order": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string" },
+        "amount": { "type": "integer", "description": "实付金额（分）" }
+      }
+    }
+  }
+}

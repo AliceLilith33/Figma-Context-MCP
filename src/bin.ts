@@ -4,6 +4,7 @@ import { cli } from "cleye";
 import { getServerConfig, UsageError } from "./config.js";
 import { startServer } from "./server.js";
 import { fetchCommand } from "./commands/fetch.js";
+import { apiCommand } from "./commands/api.js";
 
 const argv = cli({
   name: "figma-developer-mcp",
@@ -51,6 +52,16 @@ const argv = cli({
       description:
         "HTTP proxy URL for networks that require a proxy (e.g. http://proxy:8080). Pass 'none' to ignore HTTP_PROXY/HTTPS_PROXY from the environment and connect directly.",
     },
+    openapi: {
+      type: String,
+      description:
+        "OpenAPI 3.x / Swagger 2.0 spec (file path or URL). Enables the get_api_context tool for wiring designs to backend endpoints.",
+    },
+    openapiHeader: {
+      type: String,
+      description:
+        'Request header used when fetching the OpenAPI spec URL, e.g. "Authorization: Bearer xxx"',
+    },
     stdio: {
       type: Boolean,
       description: "Run in stdio transport mode for MCP clients",
@@ -60,7 +71,7 @@ const argv = cli({
       description: "Disable usage telemetry (telemetry is on by default)",
     },
   },
-  commands: [fetchCommand],
+  commands: [fetchCommand, apiCommand],
 });
 
 // Subcommand callbacks execute during cli() — only start the server when no subcommand ran.

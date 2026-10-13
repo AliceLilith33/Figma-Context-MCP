@@ -1,6 +1,7 @@
 import { config as loadEnv } from "dotenv";
 import { resolve as resolvePath } from "path";
 import type { FigmaAuthOptions } from "./services/figma.js";
+import { isUrl, type OpenApiSource } from "./services/openapi/load.js";
 import { resolveTelemetryEnabled } from "./telemetry/index.js";
 import { VALID_OUTPUT_FORMATS, isOutputFormat, type OutputFormat } from "./utils/serialize.js";
 
@@ -22,6 +23,8 @@ export interface ServerFlags {
   skipImageDownloads?: boolean;
   imageDir?: string;
   proxy?: string;
+  openapi?: string;
+  openapiHeader?: string;
   stdio?: boolean;
   noTelemetry?: boolean;
 }
@@ -34,6 +37,7 @@ export interface ServerConfig {
   outputFormat: OutputFormat;
   skipImageDownloads: boolean;
   imageDir: string;
+  openapi: OpenApiSource | undefined;
   isStdioMode: boolean;
   noTelemetry: boolean;
   configSources: Record<string, Source>;
@@ -109,6 +113,36 @@ export function resolveAuth(flags: {
 }
 
 /**
+ * Resolve the OpenAPI spec source (CLI flag → env var). Local paths are made
+ * absolute now so a later cwd change can't silently point at another file.
+ */
+export function resolveOpenApiSource(flags: {
+  openapi?: string;
+  openapiHeader?: string;
+}): Resolved<OpenApiSource | undefined> {
+  const location = resolve(flags.openapi, envStr("OPENAPI_SPEC"), undefined);
+  if (!location.value) return { value: undefined, source: location.source };
+
+  const header = flags.openapiHeader ?? envStr("OPENAPI_SPEC_HEADER");
+  const source: OpenApiSource = isUrl(location.value)
+    ? { location: location.value, headers: header ? parseHeader(header) : undefined }
+    : { location: resolvePath(location.value) };
+  return { value: source, source: location.source };
+}
+
+function parseHeader(header: string): Record<string, string> {
+  const separator = header.indexOf(":");
+  const name = header.slice(0, separator).trim();
+  const value = header.slice(separator + 1).trim();
+  if (separator <= 0 || !name || !value) {
+    throw new UsageError(
+      `Invalid OpenAPI spec header '${header}'. Expected "Name: value", e.g. "Authorization: Bearer xxx".`,
+    );
+  }
+  return { [name]: value };
+}
+
+/**
  * Thrown for user-fixable input errors (missing credentials, missing file key,
  * etc.). CLI entry points catch this and print the bare message with exit 1,
  * distinct from unexpected crashes that get a "Failed to start server:" prefix
@@ -166,6 +200,8 @@ export function getServerConfig(flags: ServerFlags): ServerConfig {
   // correctly respects NO_PROXY exclusions.
   const proxy = resolve(flags.proxy, envStr("FIGMA_PROXY"), undefined);
 
+  const openapi = resolveOpenApiSource(flags);
+
   // --format wins; --json is a back-compat alias for --format=json. Invalid
   // user-supplied values fail loudly at startup rather than silently coercing.
   const formatFromFlag =
@@ -193,6 +229,7 @@ export function getServerConfig(flags: ServerFlags): ServerConfig {
     outputFormat: outputFormat.source,
     skipImageDownloads: skipImageDownloads.source,
     imageDir: imageDir.source,
+    openapi: openapi.source,
     telemetry: telemetrySource,
   };
 
@@ -220,6 +257,9 @@ export function getServerConfig(flags: ServerFlags): ServerConfig {
       `- SKIP_IMAGE_DOWNLOADS: ${skipImageDownloads.value} (source: ${configSources.skipImageDownloads})`,
     );
     console.log(`- IMAGE_DIR: ${imageDir.value} (source: ${configSources.imageDir})`);
+    console.log(
+      `- OPENAPI_SPEC: ${openapi.value?.location ?? "none"}${openapi.value?.headers ? " (with auth header)" : ""} (source: ${configSources.openapi})`,
+    );
     const telemetryEnabled = resolveTelemetryEnabled(noTelemetry);
     console.log(
       `- TELEMETRY: ${telemetryEnabled ? "enabled" : "disabled"} (source: ${configSources.telemetry})`,
@@ -235,6 +275,7 @@ export function getServerConfig(flags: ServerFlags): ServerConfig {
     outputFormat: outputFormat.value,
     skipImageDownloads: skipImageDownloads.value,
     imageDir: imageDir.value,
+    openapi: openapi.value,
     isStdioMode,
     noTelemetry,
     configSources,
